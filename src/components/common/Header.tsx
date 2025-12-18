@@ -9,6 +9,7 @@ interface HeaderProps {
   onBackPress?: () => void;
   rightIcon?: keyof typeof Ionicons.glyphMap;
   onRightPress?: () => void;
+  rightComponent?: React.ReactNode; // custom right components like Export button
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -17,6 +18,7 @@ const Header: React.FC<HeaderProps> = ({
   onBackPress,
   rightIcon,
   onRightPress,
+  rightComponent,
 }) => {
   return (
     <View style={styles.container}>
@@ -31,11 +33,13 @@ const Header: React.FC<HeaderProps> = ({
       <Text style={styles.title}>{title}</Text>
 
       <View style={styles.rightSection}>
-        {rightIcon && (
+        {rightComponent ? (
+          rightComponent
+        ) : rightIcon ? (
           <TouchableOpacity onPress={onRightPress} style={styles.iconButton}>
             <Ionicons name={rightIcon} size={24} color={COLORS.textPrimary} />
           </TouchableOpacity>
-        )}
+        ) : null}
       </View>
     </View>
   );
@@ -55,7 +59,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   rightSection: {
-    width: 40,
+    minWidth: 40,
     alignItems: "flex-end",
   },
   title: {
