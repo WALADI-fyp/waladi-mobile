@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { COLORS, LAYOUT } from "../constants";
 import { DUMMY_ANALYTICS_DATA } from "../constants/dummy-data";
+import Header from "../components/common/Header";
 import TabSwitcher from "../components/common/TabSwitcher";
 import MetricCard from "../components/analytics/MetricCard";
 import TemperatureChart from "../components/analytics/TemperatureChart";
@@ -27,25 +28,16 @@ const AnalyticsScreen = () => {
       ? DUMMY_ANALYTICS_DATA.environment
       : DUMMY_ANALYTICS_DATA.baby;
 
+  // Export button component
+  const ExportButton = (
+    <TouchableOpacity style={styles.exportButton} onPress={handleExportPress}>
+      <Text style={styles.exportText}>Export</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* Custom Header with Export Button */}
-      <View style={styles.headerContainer}>
-        <View style={styles.headerContent}>
-          <View style={styles.leftSection} />
-
-          <Text style={styles.headerTitle}>Analytics</Text>
-
-          <View style={styles.rightSection}>
-            <TouchableOpacity
-              style={styles.exportButton}
-              onPress={handleExportPress}
-            >
-              <Text style={styles.exportText}>Export</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+      <Header title="Analytics" rightComponent={ExportButton} />
 
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.content}>
@@ -77,31 +69,6 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.background,
-  },
-  headerContainer: {
-    backgroundColor: COLORS.white,
-  },
-  headerContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: LAYOUT.spacing.md,
-    paddingVertical: LAYOUT.spacing.md,
-    backgroundColor: COLORS.white,
-  },
-  leftSection: {
-    width: 40,
-  },
-  rightSection: {
-    width: "auto",
-    alignItems: "flex-end",
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: COLORS.textPrimary,
-    flex: 1,
-    textAlign: "center",
   },
   exportButton: {
     backgroundColor: COLORS.primary,
