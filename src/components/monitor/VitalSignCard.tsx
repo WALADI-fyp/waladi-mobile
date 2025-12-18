@@ -9,34 +9,22 @@ interface VitalSignCardProps {
 }
 
 const VitalSignCard: React.FC<VitalSignCardProps> = ({ vitalSign }) => {
-  const getStatusColor = (status: VitalSign["status"]) => {
+  const getStatusInfo = (status: VitalSign["status"]) => {
     switch (status) {
       case "normal":
-        return COLORS.success;
+        return { color: COLORS.success, text: "Normal" };
       case "warning":
-        return COLORS.warning;
+        return { color: COLORS.warning, text: "Warning" };
       case "critical":
-        return COLORS.low;
+        return { color: COLORS.low, text: "Critical" };
       default:
-        return COLORS.gray;
+        return { color: COLORS.gray, text: "Unknown" };
     }
   };
 
-  const getStatusText = (status: VitalSign["status"]) => {
-    switch (status) {
-      case "normal":
-        return "Normal";
-      case "warning":
-        return "Warning";
-      case "critical":
-        return "Critical";
-      default:
-        return "Unknown";
-    }
-  };
-
-  const statusColor = getStatusColor(vitalSign.status);
-  const statusText = getStatusText(vitalSign.status);
+  const { color: statusColor, text: statusText } = getStatusInfo(
+    vitalSign.status
+  );
 
   return (
     <View style={styles.container}>
