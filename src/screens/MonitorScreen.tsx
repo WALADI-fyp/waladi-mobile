@@ -5,6 +5,7 @@ import { DUMMY_MONITOR_DATA } from "../constants/dummy-data";
 import Header from "../components/common/Header";
 import LiveVideoPlayer from "../components/monitor/LiveVideoPlayer";
 import VitalSignCard from "../components/monitor/VitalSignCard";
+import AnimatedCard from "../components/common/AnimatedCard";
 
 const MonitorScreen = () => {
   const handleFullScreen = () => {
@@ -25,19 +26,23 @@ const MonitorScreen = () => {
 
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.content}>
-          <LiveVideoPlayer
-            isLive={DUMMY_MONITOR_DATA.isLive}
-            position={DUMMY_MONITOR_DATA.position}
-            positionStatus={DUMMY_MONITOR_DATA.positionStatus}
-            onFullScreenPress={handleFullScreen}
-          />
+          <AnimatedCard delay={0}>
+            <LiveVideoPlayer
+              isLive={DUMMY_MONITOR_DATA.isLive}
+              position={DUMMY_MONITOR_DATA.position}
+              positionStatus={DUMMY_MONITOR_DATA.positionStatus}
+              onFullScreenPress={handleFullScreen}
+            />
+          </AnimatedCard>
 
           <Text style={styles.sectionTitle}>Vital Signs</Text>
 
           <View style={styles.vitalSignsGrid}>
-            {DUMMY_MONITOR_DATA.vitalSigns.map((vitalSign) => (
+            {DUMMY_MONITOR_DATA.vitalSigns.map((vitalSign, index) => (
               <View key={vitalSign.id} style={styles.vitalSignCard}>
-                <VitalSignCard vitalSign={vitalSign} />
+                <AnimatedCard delay={100 + index * 100}>
+                  <VitalSignCard vitalSign={vitalSign} />
+                </AnimatedCard>
               </View>
             ))}
           </View>

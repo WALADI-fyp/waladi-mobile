@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, Image, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS, LAYOUT } from "../../constants";
+import PulseView from "../common/PulseView";
 
 interface LiveVideoPlayerProps {
   isLive: boolean;
@@ -35,13 +36,14 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         <Text style={styles.title}>Live Preview</Text>
         {isLive && (
           <View style={styles.liveIndicator}>
-            <View style={styles.liveDot} />
+            <PulseView color={COLORS.error}>
+              <View style={styles.liveDot} />
+            </PulseView>
             <Text style={styles.liveText}>Live</Text>
           </View>
         )}
       </View>
 
-      {/* Placeholder for video - you can replace with actual video component */}
       <View style={styles.videoContainer}>
         <Image
           source={{ uri: "https://via.placeholder.com/400x250" }}
@@ -80,10 +82,10 @@ const styles = StyleSheet.create({
     padding: LAYOUT.spacing.md,
     marginBottom: LAYOUT.spacing.lg,
     shadowColor: COLORS.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 5,
   },
   header: {
     flexDirection: "row",
@@ -115,6 +117,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.error,
     fontWeight: "600",
+    marginLeft: 4,
   },
   videoContainer: {
     borderRadius: LAYOUT.borderRadius.md,
@@ -149,6 +152,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: LAYOUT.spacing.md,
     paddingVertical: LAYOUT.spacing.sm,
     borderRadius: LAYOUT.borderRadius.sm,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   fullScreenText: {
     color: COLORS.white,
