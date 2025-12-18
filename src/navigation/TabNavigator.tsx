@@ -26,20 +26,20 @@ const TabNavigator = () => {
       }}
     >
       <Tab.Screen
-        name="Analytics"
-        component={AnalyticsScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="analytics-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tab.Screen
         name="Monitor"
         component={MonitorScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="videocam-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Analytics"
+        component={AnalyticsScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="analytics-outline" size={size} color={color} />
           ),
         }}
       />
