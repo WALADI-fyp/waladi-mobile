@@ -1,25 +1,104 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { COLORS } from '../constants';
+import React from "react";
+import { View, Text, StyleSheet, ScrollView, SafeAreaView } from "react-native";
+import { COLORS, LAYOUT } from "../constants";
+import { DUMMY_BABY_PROFILE } from "../constants/dummy-data";
+import Header from "../components/common/Header";
+import ProfileHeader from "../components/profile/ProfileHeader";
+import SettingsItem from "../components/profile/SettingsItem";
 
 const ProfileScreen = () => {
+  const handleEditProfile = () => {
+    console.log("Edit profile pressed");
+  };
+
+  const handleNotificationSettings = () => {
+    console.log("Notification settings pressed");
+  };
+
+  const handleAccountSettings = () => {
+    console.log("Account settings pressed");
+  };
+
+  const handleHelpSupport = () => {
+    console.log("Help & Support pressed");
+  };
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.text}>Profile Screen</Text>
-    </View>
+    <SafeAreaView style={styles.safeArea}>
+      <Header title="Profile" />
+
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        <ProfileHeader
+          profile={DUMMY_BABY_PROFILE}
+          onEditPress={handleEditProfile}
+        />
+
+        {/* Settings Section */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.sectionTitle}>Settings</Text>
+
+          <View style={styles.settingsList}>
+            <SettingsItem
+              title="Notification Settings"
+              subtitle="Manage alerts"
+              icon="notifications-outline"
+              iconColor="#6C63FF"
+              iconBackground="#EDE7F6"
+              onPress={handleNotificationSettings}
+            />
+            <SettingsItem
+              title="Account Settings"
+              subtitle="Privacy & security"
+              icon="person-outline"
+              iconColor="#2196F3"
+              iconBackground="#E3F2FD"
+              onPress={handleAccountSettings}
+            />
+            <SettingsItem
+              title="Help & Support"
+              subtitle="FAQ & contact"
+              icon="help-circle-outline"
+              iconColor="#F44336"
+              iconBackground="#FFEBEE"
+              onPress={handleHelpSupport}
+              showBorder={false}
+            />
+          </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-  text: {
-    fontSize: 24,
+  settingsSection: {
+    marginTop: LAYOUT.spacing.lg,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
     color: COLORS.textPrimary,
+    marginBottom: LAYOUT.spacing.sm,
+    paddingHorizontal: LAYOUT.spacing.md,
+  },
+  settingsList: {
+    backgroundColor: COLORS.white,
+    borderRadius: LAYOUT.borderRadius.md,
+    marginHorizontal: LAYOUT.spacing.md,
+    overflow: "hidden",
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
 });
 
