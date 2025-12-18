@@ -1,5 +1,6 @@
 import { AnalyticsData } from "../types/analytics.types";
 import { VitalSign, LiveMonitorData } from "../types/monitor.types";
+import { BabyProfile } from '../types/profile.types';
 
 export const DUMMY_VITAL_SIGNS: VitalSign[] = [
   {
@@ -132,4 +133,13 @@ export const DUMMY_ANALYTICS_DATA: AnalyticsData = {
       { time: "9PM", value: 37 },
     ],
   },
+};
+
+
+export const DUMMY_BABY_PROFILE: BabyProfile = {
+  id: '1',
+  name: 'Sleiman',
+  age: '3 weeks old',
+  birthDate: 'Born: January 26, 2025',
+  avatarUrl: undefined, 
 };

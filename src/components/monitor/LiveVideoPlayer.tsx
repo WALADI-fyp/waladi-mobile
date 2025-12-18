@@ -1,12 +1,12 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { COLORS, LAYOUT } from '../../constants';
+import React from "react";
+import { View, Text, StyleSheet, Image, TouchableOpacity } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { COLORS, LAYOUT } from "../../constants";
 
 interface LiveVideoPlayerProps {
   isLive: boolean;
   position: string;
-  positionStatus: 'safe' | 'warning' | 'danger';
+  positionStatus: "safe" | "warning" | "danger";
   onFullScreenPress: () => void;
 }
 
@@ -18,11 +18,11 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 }) => {
   const getStatusColor = () => {
     switch (positionStatus) {
-      case 'safe':
+      case "safe":
         return COLORS.success;
-      case 'warning':
+      case "warning":
         return COLORS.warning;
-      case 'danger':
+      case "danger":
         return COLORS.error;
       default:
         return COLORS.gray;
@@ -44,7 +44,7 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       {/* Placeholder for video - you can replace with actual video component */}
       <View style={styles.videoContainer}>
         <Image
-          source={{ uri: 'https://via.placeholder.com/400x250' }}
+          source={{ uri: "https://via.placeholder.com/400x250" }}
           style={styles.videoPlaceholder}
           resizeMode="cover"
         />
@@ -52,13 +52,20 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
       <View style={styles.footer}>
         <View style={styles.positionContainer}>
-          <Ionicons name="checkmark-circle" size={16} color={getStatusColor()} />
+          <Ionicons
+            name="checkmark-circle"
+            size={16}
+            color={getStatusColor()}
+          />
           <Text style={styles.positionText}>
             Safe - <Text style={styles.positionBold}>{position}</Text>
           </Text>
         </View>
 
-        <TouchableOpacity style={styles.fullScreenButton} onPress={onFullScreenPress}>
+        <TouchableOpacity
+          style={styles.fullScreenButton}
+          onPress={onFullScreenPress}
+        >
           <Text style={styles.fullScreenText}>View Full Screen</Text>
         </TouchableOpacity>
       </View>
@@ -79,20 +86,20 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: LAYOUT.spacing.md,
   },
   title: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.textPrimary,
   },
   liveIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFE5E5',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFE5E5",
     paddingHorizontal: LAYOUT.spacing.sm,
     paddingVertical: 4,
     borderRadius: LAYOUT.borderRadius.sm,
@@ -107,26 +114,26 @@ const styles = StyleSheet.create({
   liveText: {
     fontSize: 12,
     color: COLORS.error,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   videoContainer: {
     borderRadius: LAYOUT.borderRadius.md,
-    overflow: 'hidden',
+    overflow: "hidden",
     marginBottom: LAYOUT.spacing.md,
     backgroundColor: COLORS.lightGray,
   },
   videoPlaceholder: {
-    width: '100%',
+    width: "100%",
     height: 200,
   },
   footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   positionContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   positionText: {
     fontSize: 13,
@@ -134,7 +141,7 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   positionBold: {
-    fontWeight: '600',
+    fontWeight: "600",
     color: COLORS.textPrimary,
   },
   fullScreenButton: {
@@ -146,7 +153,7 @@ const styles = StyleSheet.create({
   fullScreenText: {
     color: COLORS.white,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 });
 
