@@ -9,19 +9,50 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs access to the camera to monitor your baby.",
+        "NSMicrophoneUsageDescription": "This app needs access to the microphone for two-way audio communication.",
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to save snapshots.",
+        "NSPhotoLibraryAddUsageDescription": "This app needs access to save photos to your library."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
-      }
+      },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow WALADI to access your camera to monitor your baby."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow WALADI to access your photos.",
+          "savePhotosPermission": "Allow WALADI to save photos."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow WALADI to access your microphone."
+        }
+      ]
+    ]
   }
 }
