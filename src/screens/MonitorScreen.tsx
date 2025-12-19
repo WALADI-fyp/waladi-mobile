@@ -6,13 +6,16 @@ import Header from "../components/common/Header";
 import LiveVideoPlayer from "../components/monitor/LiveVideoPlayer";
 import VitalSignCard from "../components/monitor/VitalSignCard";
 import AnimatedCard from "../components/common/AnimatedCard";
+import * as Haptics from "expo-haptics";
 
 const MonitorScreen = () => {
   const handleFullScreen = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Full screen pressed");
   };
 
   const handleSettingsPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Settings pressed");
   };
 
