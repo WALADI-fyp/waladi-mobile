@@ -3,8 +3,8 @@ export type RootStackParamList = {
 };
 
 export type TabParamList = {
-  Analytics: undefined;
   Monitor: undefined;
-  Reports: undefined;
+  Analytics: undefined;
+  Alerts: undefined;
   Profile: undefined;
 };
