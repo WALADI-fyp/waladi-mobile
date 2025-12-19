@@ -1,22 +1,29 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView, SafeAreaView } from "react-native";
-import { COLORS, LAYOUT } from "../constants";
-import { DUMMY_MONITOR_DATA } from "../constants/dummy-data";
-import Header from "../components/common/Header";
-import LiveVideoPlayer from "../components/monitor/LiveVideoPlayer";
-import VitalSignCard from "../components/monitor/VitalSignCard";
-import AnimatedCard from "../components/common/AnimatedCard";
-import * as Haptics from "expo-haptics";
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, SafeAreaView } from 'react-native';
+import { COLORS, LAYOUT } from '../constants';
+import { DUMMY_MONITOR_DATA } from '../constants/dummy-data';
+import Header from '../components/common/Header';
+import LiveVideoPlayer from '../components/monitor/LiveVideoPlayer';
+import VitalSignCard from '../components/monitor/VitalSignCard';
+import FullScreenVideoModal from '../components/monitor/FullScreenVideoModal';
+import AnimatedCard from '../components/common/AnimatedCard';
+import * as Haptics from 'expo-haptics';
 
 const MonitorScreen = () => {
+  const [isFullScreenVisible, setIsFullScreenVisible] = useState(false);
+
   const handleFullScreen = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    console.log("Full screen pressed");
+    setIsFullScreenVisible(true);
+  };
+
+  const handleCloseFullScreen = () => {
+    setIsFullScreenVisible(false);
   };
 
   const handleSettingsPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    console.log("Settings pressed");
+    console.log('Settings pressed');
   };
 
   return (
@@ -26,7 +33,7 @@ const MonitorScreen = () => {
         rightIcon="settings-outline"
         onRightPress={handleSettingsPress}
       />
-
+      
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.content}>
           <AnimatedCard delay={0}>
@@ -51,6 +58,14 @@ const MonitorScreen = () => {
           </View>
         </View>
       </ScrollView>
+
+      {/* Full Screen Video Modal */}
+      <FullScreenVideoModal
+        visible={isFullScreenVisible}
+        isLive={DUMMY_MONITOR_DATA.isLive}
+        position={DUMMY_MONITOR_DATA.position}
+        onClose={handleCloseFullScreen}
+      />
     </SafeAreaView>
   );
 };
@@ -69,17 +84,17 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: "600",
+    fontWeight: '600',
     color: COLORS.textPrimary,
     marginBottom: LAYOUT.spacing.md,
   },
   vitalSignsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     marginHorizontal: -LAYOUT.spacing.xs,
   },
   vitalSignCard: {
-    width: "50%",
+    width: '50%',
     padding: LAYOUT.spacing.xs,
   },
 });
