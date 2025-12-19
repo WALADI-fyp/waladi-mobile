@@ -5,21 +5,25 @@ import { DUMMY_BABY_PROFILE } from "../constants/dummy-data";
 import Header from "../components/common/Header";
 import ProfileHeader from "../components/profile/ProfileHeader";
 import SettingsItem from "../components/profile/SettingsItem";
-
+import * as Haptics from "expo-haptics";
 const ProfileScreen = () => {
   const handleEditProfile = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Edit profile pressed");
   };
 
   const handleNotificationSettings = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Notification settings pressed");
   };
 
   const handleAccountSettings = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Account settings pressed");
   };
 
   const handleHelpSupport = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Help & Support pressed");
   };
 

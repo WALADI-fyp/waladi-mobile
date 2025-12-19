@@ -13,6 +13,7 @@ import Header from "../components/common/Header";
 import TabSwitcher from "../components/common/TabSwitcher";
 import MetricCard from "../components/analytics/MetricCard";
 import TemperatureChart from "../components/analytics/TemperatureChart";
+import * as Haptics from "expo-haptics";
 
 const AnalyticsScreen = () => {
   const [activeTab, setActiveTab] = useState<"Environment" | "Baby">(
@@ -20,6 +21,7 @@ const AnalyticsScreen = () => {
   );
 
   const handleExportPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Export pressed");
   };
 
