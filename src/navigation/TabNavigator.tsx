@@ -8,6 +8,7 @@ import { TabParamList } from "./types";
 import AnalyticsScreen from "../screens/AnalyticsScreen";
 import MonitorScreen from "../screens/MonitorScreen";
 import ProfileScreen from "../screens/ProfileScreen";
+import AlertsScreen from "../screens/AlertsScreen";
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
@@ -44,11 +45,11 @@ const TabNavigator = () => {
         }}
       />
       <Tab.Screen
-        name="Reports"
-        component={AnalyticsScreen}
+        name="Alerts"
+        component={AlertsScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="document-text-outline" size={size} color={color} />
+            <Ionicons name="notifications-outline" size={size} color={color} />
           ),
         }}
       />
