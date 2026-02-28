@@ -2,8 +2,10 @@ export interface VitalSign {
   id: string;
   label: string;
   value: string;
+  unit?: string;
   status: "normal" | "warning" | "critical";
   icon: string;
+  isMock?: boolean;
 }
 
 export interface LiveMonitorData {

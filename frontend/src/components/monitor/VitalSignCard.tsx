@@ -23,7 +23,7 @@ const VitalSignCard: React.FC<VitalSignCardProps> = ({ vitalSign }) => {
   };
 
   const { color: statusColor, text: statusText } = getStatusInfo(
-    vitalSign.status
+    vitalSign.status,
   );
 
   return (
@@ -34,19 +34,27 @@ const VitalSignCard: React.FC<VitalSignCardProps> = ({ vitalSign }) => {
           size={20}
           color={statusColor}
         />
-        <Text style={[styles.status, { color: statusColor }]}>
-          {statusText}
-        </Text>
+        <View style={styles.headerRight}>
+          <Text style={[styles.status, { color: statusColor }]}>
+            {statusText}
+          </Text>
+        </View>
       </View>
 
       <Text style={styles.label}>{vitalSign.label}</Text>
-      <Text style={styles.value}>{vitalSign.value}</Text>
+      <View style={styles.valueRow}>
+        <Text style={styles.value}>{vitalSign.value}</Text>
+        {vitalSign.unit && <Text style={styles.unit}>{vitalSign.unit}</Text>}
+      </View>
 
       <View style={styles.progressBarContainer}>
         <View
           style={[
             styles.progressBar,
-            { backgroundColor: statusColor, width: "80%" },
+            {
+              backgroundColor: statusColor,
+              width: "80%",
+            },
           ]}
         />
       </View>
@@ -67,12 +75,19 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: LAYOUT.spacing.sm,
   },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
   status: {
     fontSize: 12,
     fontWeight: "600",
@@ -82,12 +97,23 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginBottom: LAYOUT.spacing.xs,
   },
+  valueRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    marginBottom: LAYOUT.spacing.sm,
+  },
   value: {
     fontSize: 24,
     fontWeight: "700",
     color: COLORS.textPrimary,
-    marginBottom: LAYOUT.spacing.sm,
   },
+  unit: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: COLORS.textSecondary,
+    marginLeft: 3,
+  },
+
   progressBarContainer: {
     height: 4,
     backgroundColor: COLORS.lightGray,
