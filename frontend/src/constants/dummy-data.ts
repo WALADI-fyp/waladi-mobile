@@ -1,44 +1,15 @@
 import { AnalyticsData } from "../types/analytics.types";
-import { VitalSign, LiveMonitorData } from "../types/monitor.types";
-import { BabyProfile } from '../types/profile.types';
-import { Alert } from '../types/alert.types';
+import { LiveMonitorData } from "../types/monitor.types";
+import { BabyProfile } from "../types/profile.types";
+import { Alert } from "../types/alert.types";
 
-export const DUMMY_VITAL_SIGNS: VitalSign[] = [
-  {
-    id: "1",
-    label: "Body Temp",
-    value: "36.8°C",
-    status: "normal",
-    icon: "thermometer-outline",
-  },
-  {
-    id: "2",
-    label: "Room Temp",
-    value: "26.2°C",
-    status: "warning",
-    icon: "home-outline",
-  },
-  {
-    id: "3",
-    label: "Humidity",
-    value: "28%",
-    status: "warning",
-    icon: "water-outline",
-  },
-  {
-    id: "4",
-    label: "Breathing Rate",
-    value: "98%",
-    status: "normal",
-    icon: "fitness-outline",
-  },
-];
+// Vital signs are now provided by the live SSE stream via useVitalSigns().
+// Only the video/position data remains as dummy for now.
 
-export const DUMMY_MONITOR_DATA: LiveMonitorData = {
+export const DUMMY_MONITOR_DATA: Omit<LiveMonitorData, "vitalSigns"> = {
   isLive: true,
   position: "Back Position",
   positionStatus: "safe",
-  vitalSigns: DUMMY_VITAL_SIGNS,
 };
 
 export const DUMMY_ANALYTICS_DATA: AnalyticsData = {
@@ -136,84 +107,87 @@ export const DUMMY_ANALYTICS_DATA: AnalyticsData = {
   },
 };
 
-
 export const DUMMY_BABY_PROFILE: BabyProfile = {
-  id: '1',
-  name: 'Sleiman',
-  age: '3 weeks old',
-  birthDate: 'Born: January 26, 2025',
-  avatarUrl: undefined, 
+  id: "1",
+  name: "Sleiman",
+  age: "3 weeks old",
+  birthDate: "Born: January 26, 2025",
+  avatarUrl: undefined,
 };
 
 export const DUMMY_ALERTS: Alert[] = [
   {
-    id: '1',
-    title: 'High Room Temperature',
-    message: 'Room temperature has risen to 28°C. Consider turning on the AC or fan to cool down the room.',
-    severity: 'warning',
-    category: 'temperature',
-    status: 'unread',
+    id: "1",
+    title: "High Room Temperature",
+    message:
+      "Room temperature has risen to 28°C. Consider turning on the AC or fan to cool down the room.",
+    severity: "warning",
+    category: "temperature",
+    status: "unread",
     timestamp: new Date(Date.now() - 5 * 60 * 1000), // 5 mins ago
-    icon: 'thermometer-outline',
+    icon: "thermometer-outline",
   },
   {
-    id: '2',
-    title: 'Baby Movement Detected',
-    message: 'Unusual movement detected. Baby may have changed sleeping position.',
-    severity: 'info',
-    category: 'movement',
-    status: 'unread',
+    id: "2",
+    title: "Baby Movement Detected",
+    message:
+      "Unusual movement detected. Baby may have changed sleeping position.",
+    severity: "info",
+    category: "movement",
+    status: "unread",
     timestamp: new Date(Date.now() - 15 * 60 * 1000), // 15 mins ago
-    icon: 'body-outline',
+    icon: "body-outline",
   },
   {
-    id: '3',
-    title: 'Low Humidity Alert',
-    message: 'Humidity dropped to 25%. Consider using a humidifier to maintain optimal levels.',
-    severity: 'warning',
-    category: 'humidity',
-    status: 'unread',
+    id: "3",
+    title: "Low Humidity Alert",
+    message:
+      "Humidity dropped to 25%. Consider using a humidifier to maintain optimal levels.",
+    severity: "warning",
+    category: "humidity",
+    status: "unread",
     timestamp: new Date(Date.now() - 30 * 60 * 1000), // 30 mins ago
-    icon: 'water-outline',
+    icon: "water-outline",
   },
   {
-    id: '4',
-    title: 'Crying Detected',
-    message: 'Baby crying detected at 2:45 AM. Sound level was moderate.',
-    severity: 'info',
-    category: 'sound',
-    status: 'read',
+    id: "4",
+    title: "Crying Detected",
+    message: "Baby crying detected at 2:45 AM. Sound level was moderate.",
+    severity: "info",
+    category: "sound",
+    status: "read",
     timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-    icon: 'volume-high-outline',
+    icon: "volume-high-outline",
   },
   {
-    id: '5',
-    title: 'Critical: High Body Temperature',
-    message: 'Baby\'s body temperature reached 38.5°C. Please check on baby immediately.',
-    severity: 'critical',
-    category: 'temperature',
-    status: 'read',
+    id: "5",
+    title: "Critical: High Body Temperature",
+    message:
+      "Baby's body temperature reached 38.5°C. Please check on baby immediately.",
+    severity: "critical",
+    category: "temperature",
+    status: "read",
     timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000), // 4 hours ago
-    icon: 'thermometer-outline',
+    icon: "thermometer-outline",
   },
   {
-    id: '6',
-    title: 'Connection Lost',
-    message: 'Monitor connection was temporarily lost and has been restored.',
-    severity: 'info',
-    category: 'system',
-    status: 'read',
+    id: "6",
+    title: "Connection Lost",
+    message: "Monitor connection was temporarily lost and has been restored.",
+    severity: "info",
+    category: "system",
+    status: "read",
     timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000), // 6 hours ago
-    icon: 'wifi-outline',
+    icon: "wifi-outline",
   },
   {
-    id: '7',
-    title: 'Breathing Pattern Change',
-    message: 'Slight change in breathing pattern detected. Currently stable.',
-    severity: 'warning',
-    category: 'breathing',
-    status: 'read',
+    id: "7",
+    title: "Breathing Pattern Change",
+    message: "Slight change in breathing pattern detected. Currently stable.",
+    severity: "warning",
+    category: "breathing",
+    status: "read",
     timestamp: new Date(Date.now() - 12 * 60 * 60 * 1000), // 12 hours ago
-    icon: 'fitness-outline',
+    icon: "fitness-outline",
   },
 ];

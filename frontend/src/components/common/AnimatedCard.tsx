@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { StyleSheet, Animated, Pressable } from "react-native";
 import { COLORS, LAYOUT } from "../../constants";
 
@@ -13,9 +13,9 @@ const AnimatedCard: React.FC<AnimatedCardProps> = ({
   delay = 0,
   onPress,
 }) => {
-  const fadeAnim = new Animated.Value(0);
-  const slideAnim = new Animated.Value(30);
-  const scaleAnim = new Animated.Value(1);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.parallel([
