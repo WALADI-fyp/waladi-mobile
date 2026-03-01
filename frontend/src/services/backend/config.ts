@@ -15,3 +15,6 @@ export const BASE_URL = `http://${BACKEND_IP}:3000`;
 export const STREAM_URL = `${BASE_URL}/api/stream`;
 export const LATEST_URL = `${BASE_URL}/api/readings/latest`;
 export const READINGS_URL = `${BASE_URL}/api/readings`;
+export const DEVICES_CLAIM_URL = `${BASE_URL}/api/devices/claim`;
+export const DEVICES_URL = `${BASE_URL}/api/devices`;
+export const SENSOR_DATA_URL = `${BASE_URL}/api/sensor-data`;

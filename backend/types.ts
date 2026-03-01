@@ -14,6 +14,7 @@ export interface SensorData {
 export interface SensorPayload {
   ts: number; // Unix timestamp in milliseconds
   source: string; // Always "fusion_service"
+  device_id?: string; // Pi device ID (e.g. "waladi-a3f9c2d1")
   data: SensorData;
 }
 
@@ -27,4 +28,6 @@ export interface SensorReading {
   body_temperature_c: number;
   room_humidity_rh: number;
   mock_fields: string[];
+  device_id: string | null;
+  user_id: string | null;
 }

@@ -14,5 +14,14 @@ export interface SensorData {
 export interface SensorPayload {
   ts: number; // Unix timestamp in milliseconds
   source: string; // Always "fusion_service"
+  device_id?: string; // Pi device ID
   data: SensorData;
+}
+
+export interface UserDevice {
+  id: number;
+  user_id: string;
+  device_id: string;
+  name: string;
+  created_at: string;
 }

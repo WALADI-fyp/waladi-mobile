@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '@clerk/clerk-expo';
@@ -6,6 +6,7 @@ import { ActivityIndicator, View } from 'react-native';
 import TabNavigator from './TabNavigator';
 import SignInScreen from '../screens/SignInScreen';
 import SignUpScreen from '../screens/SignUpScreen';
+import PairingScreen from '../screens/PairingScreen';
 import { AuthStackParamList, RootStackParamList } from './types';
 import { COLORS } from '../constants';
 
@@ -35,6 +36,9 @@ const AuthNavigator = () => {
 
 const AppNavigator = () => {
   const { isSignedIn, isLoaded } = useAuth();
+  const [hasPaired, setHasPaired] = useState(false);
+
+  const handlePaired = useCallback(() => setHasPaired(true), []);
 
   if (!isLoaded) {
     return (
@@ -47,10 +51,14 @@ const AppNavigator = () => {
   return (
     <NavigationContainer>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
-        {isSignedIn ? (
-          <RootStack.Screen name="Main" component={TabNavigator} />
-        ) : (
+        {!isSignedIn ? (
           <RootStack.Screen name="Auth" component={AuthNavigator} />
+        ) : !hasPaired ? (
+          <RootStack.Screen name="Pairing">
+            {() => <PairingScreen onPaired={handlePaired} />}
+          </RootStack.Screen>
+        ) : (
+          <RootStack.Screen name="Main" component={TabNavigator} />
         )}
       </RootStack.Navigator>
     </NavigationContainer>
