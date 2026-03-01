@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, SafeAreaView } from "react-native";
+import { View, Text, StyleSheet, ScrollView, SafeAreaView, Alert } from "react-native";
+import { useClerk, useUser } from "@clerk/clerk-expo";
 import { COLORS, LAYOUT } from "../constants";
 import { DUMMY_BABY_PROFILE } from "../constants/dummy-data";
 import Header from "../components/common/Header";
@@ -7,6 +8,8 @@ import ProfileHeader from "../components/profile/ProfileHeader";
 import SettingsItem from "../components/profile/SettingsItem";
 import * as Haptics from "expo-haptics";
 const ProfileScreen = () => {
+  const { signOut } = useClerk();
+  const { user } = useUser();
   const handleEditProfile = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Edit profile pressed");
@@ -25,6 +28,24 @@ const ProfileScreen = () => {
   const handleHelpSupport = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Help & Support pressed");
+  };
+
+  const handleSignOut = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await signOut();
+          } catch (err) {
+            console.error("Sign out error:", err);
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -65,6 +86,14 @@ const ProfileScreen = () => {
               iconColor="#F44336"
               iconBackground="#FFEBEE"
               onPress={handleHelpSupport}
+            />
+            <SettingsItem
+              title="Sign Out"
+              subtitle={user?.emailAddresses?.[0]?.emailAddress || ""}
+              icon="log-out-outline"
+              iconColor="#F44336"
+              iconBackground="#FFEBEE"
+              onPress={handleSignOut}
               showBorder={false}
             />
           </View>
