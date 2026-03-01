@@ -15,6 +15,7 @@ import { COLORS, LAYOUT } from "../../constants";
 import PulseView from "../common/PulseView";
 import * as Haptics from "expo-haptics";
 import { MediaService } from "../../services/media.service";
+import CameraStream from "./CameraStream";
 
 interface FullScreenVideoModalProps {
   visible: boolean;
@@ -170,11 +171,7 @@ const FullScreenVideoModal: React.FC<FullScreenVideoModalProps> = ({
 
           {/* Video Container */}
           <View style={styles.videoContainer} ref={viewRef} collapsable={false}>
-            <Image
-              source={{ uri: "https://via.placeholder.com/800x600" }}
-              style={styles.video}
-              resizeMode="cover"
-            />
+            <CameraStream width={width} height={width * 0.75} />
 
             {/* Recording Indicator */}
             {isRecording && (

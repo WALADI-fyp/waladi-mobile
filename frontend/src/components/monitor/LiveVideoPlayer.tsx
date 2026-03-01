@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Image, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS, LAYOUT } from "../../constants";
 import PulseView from "../common/PulseView";
+import CameraStream from "./CameraStream";
 
 interface LiveVideoPlayerProps {
   isLive: boolean;
@@ -45,11 +46,7 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       </View>
 
       <View style={styles.videoContainer}>
-        <Image
-          source={{ uri: "https://via.placeholder.com/400x250" }}
-          style={styles.videoPlaceholder}
-          resizeMode="cover"
-        />
+        <CameraStream width={LAYOUT.window.width - LAYOUT.spacing.md * 4} height={200} />
       </View>
 
       <View style={styles.footer}>
