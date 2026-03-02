@@ -1,14 +1,11 @@
 /**
- * Express server — exposes sensor data via REST + SSE.
+ * WALADI REST API
  *
  * Endpoints:
- *   GET  /api/readings/latest    → most recent sensor reading
- *   GET  /api/readings           → historical readings (query params: from, to, limit)
- *   GET  /api/stream             → SSE stream that re-broadcasts Pi data
- *   POST /api/devices/claim      → link a Pi device to a Clerk user (auth required)
- *   GET  /api/devices            → list user's devices (auth required)
- *   POST /api/sensor-data        → store sensor data with device_id + user_id
- *   GET  /api/sensor-data        → fetch sensor data for authenticated user
+ *   GET  /api/readings        → historical readings (from, to, limit)
+ *   POST /api/devices/claim   → pair a device to a user (auth)
+ *   GET  /api/devices         → list user's devices (auth)
+ *   GET  /api/sensor-data     → user's sensor data (auth)
  */
 
 import express from "express";
@@ -16,7 +13,6 @@ import cors from "cors";
 import { clerkMiddleware, requireAuth, getAuth } from "@clerk/express";
 import { PORT } from "./config";
 import { pool } from "./db";
-import { getLatestPayload, onNewReading } from "./ingester";
 
 const app = express();
 app.use(cors());
@@ -24,15 +20,6 @@ app.use(express.json());
 
 // Clerk middleware — parses auth on all requests (non-blocking)
 app.use(clerkMiddleware());
-
-// ── GET /api/readings/latest ──
-app.get("/api/readings/latest", (_req, res) => {
-  const latest = getLatestPayload();
-  if (!latest) {
-    return res.status(204).json({ message: "No data yet" });
-  }
-  return res.json(latest);
-});
 
 // ── GET /api/readings ──
 app.get("/api/readings", async (req, res) => {
@@ -84,37 +71,6 @@ app.get("/api/readings", async (req, res) => {
   }
 });
 
-// ── GET /api/stream (SSE) ──
-app.get("/api/stream", (req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-    "Access-Control-Allow-Origin": "*",
-  });
-
-  // Send latest data immediately so client doesn't start blank
-  const latest = getLatestPayload();
-  if (latest) {
-    res.write(`data: ${JSON.stringify(latest)}\n\n`);
-  }
-
-  // Subscribe to new readings
-  const unsubscribe = onNewReading((payload) => {
-    res.write(`data: ${JSON.stringify(payload)}\n\n`);
-  });
-
-  // Keep-alive heartbeat every 15s
-  const heartbeat = setInterval(() => {
-    res.write(":heartbeat\n\n");
-  }, 15_000);
-
-  req.on("close", () => {
-    unsubscribe();
-    clearInterval(heartbeat);
-  });
-});
-
 // ── POST /api/devices/claim (auth required) ──
 // Links a Pi device to the authenticated user.
 app.post("/api/devices/claim", requireAuth(), async (req: any, res) => {
@@ -159,58 +115,6 @@ app.get("/api/devices", requireAuth(), async (req: any, res) => {
   }
 });
 
-// ── POST /api/sensor-data ──
-// Receives sensor data from the app and stores it with the correct user_id.
-app.post("/api/sensor-data", async (req, res) => {
-  const { device_id, ts, source, data } = req.body;
-
-  if (!device_id || !data) {
-    return res.status(400).json({ error: "device_id and data are required" });
-  }
-
-  // Look up user_id from device_id
-  let userId: string | null = null;
-  try {
-    const deviceResult = await pool.query(
-      "SELECT user_id FROM user_devices WHERE device_id = $1 LIMIT 1",
-      [device_id],
-    );
-    if (deviceResult.rows.length > 0) {
-      userId = deviceResult.rows[0].user_id;
-    }
-  } catch (err) {
-    console.error("[server] user_devices lookup failed:", err);
-  }
-
-  const time = new Date(ts || Date.now());
-
-  try {
-    await pool.query(
-      `INSERT INTO sensor_readings
-        (time, source, heart_rate_bpm, breathing_rate_bpm,
-         room_temperature_c, body_temperature_c, room_humidity_rh, mock_fields,
-         device_id, user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [
-        time,
-        source || "fusion_service",
-        data.heart_rate_bpm,
-        data.breathing_rate_bpm,
-        data.room_temperature_c,
-        data.body_temperature_c,
-        data.room_humidity_rh,
-        data.mock_fields ?? [],
-        device_id,
-        userId,
-      ],
-    );
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("[server] /api/sensor-data insert error:", err);
-    return res.status(500).json({ error: "Failed to store sensor data" });
-  }
-});
-
 // ── GET /api/sensor-data (auth required) ──
 // Fetches sensor data for the authenticated user.
 app.get("/api/sensor-data", requireAuth(), async (req: any, res) => {
@@ -241,12 +145,9 @@ app.get("/api/sensor-data", requireAuth(), async (req: any, res) => {
 export function startServer(): void {
   app.listen(PORT, () => {
     console.log(`[server] Listening on http://0.0.0.0:${PORT}`);
-    console.log(`[server]   GET  /api/readings/latest`);
-    console.log(`[server]   GET  /api/readings?from=&to=&limit=`);
-    console.log(`[server]   GET  /api/stream (SSE)`);
-    console.log(`[server]   POST /api/devices/claim (auth)`);
-    console.log(`[server]   GET  /api/devices (auth)`);
-    console.log(`[server]   POST /api/sensor-data`);
-    console.log(`[server]   GET  /api/sensor-data (auth)`);
+    console.log(`[server]   GET  /api/readings`);
+    console.log(`[server]   POST /api/devices/claim`);
+    console.log(`[server]   GET  /api/devices`);
+    console.log(`[server]   GET  /api/sensor-data`);
   });
 }

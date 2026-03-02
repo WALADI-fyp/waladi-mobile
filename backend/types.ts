@@ -1,5 +1,5 @@
 /**
- * Types matching the Pi SSE stream payload structure.
+ * Shared types for WALADI backend.
  */
 
 export interface SensorData {
@@ -12,13 +12,12 @@ export interface SensorData {
 }
 
 export interface SensorPayload {
-  ts: number; // Unix timestamp in milliseconds
-  source: string; // Always "fusion_service"
-  device_id?: string; // Pi device ID (e.g. "waladi-a3f9c2d1")
+  ts: number;
+  source: string;
+  device_id?: string;
   data: SensorData;
 }
 
-/** Shape of a row returned from the sensor_readings table. */
 export interface SensorReading {
   time: string;
   source: string;

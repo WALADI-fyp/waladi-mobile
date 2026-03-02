@@ -2,16 +2,13 @@ import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
 } from "react-native";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@clerk/clerk-expo";
 import { COLORS, LAYOUT } from "../constants";
@@ -23,61 +20,53 @@ interface PairingScreenProps {
 
 const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
   const { getToken } = useAuth();
-  const [piIp, setPiIp] = useState("172.20.10.2");
+  const [permission, requestPermission] = useCameraPermissions();
+  const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingDevices, setCheckingDevices] = useState(true);
 
   // On mount, check if user already has a paired device
   useEffect(() => {
     (async () => {
+      console.log("[PairingScreen] Checking for existing devices...");
+      console.log("[PairingScreen] DEVICES_URL =", DEVICES_URL);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        console.log("[PairingScreen] Fetch timed out after 5s");
+        controller.abort();
+      }, 5000);
       try {
         const token = await getToken();
+        console.log("[PairingScreen] Got auth token:", token ? "yes" : "NO TOKEN");
         const res = await fetch(DEVICES_URL, {
           headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
+        console.log("[PairingScreen] Response status:", res.status);
         if (res.ok) {
           const devices = await res.json();
+          console.log("[PairingScreen] Devices found:", devices.length, devices);
           if (devices.length > 0) {
-            // Already paired — skip to dashboard
             onPaired();
             return;
           }
+        } else {
+          const text = await res.text().catch(() => "");
+          console.log("[PairingScreen] Non-OK response body:", text);
         }
-      } catch {
-        // Network error — stay on pairing screen
+      } catch (err: any) {
+        clearTimeout(timeout);
+        console.log("[PairingScreen] Device check error:", err.message || err);
       }
+      console.log("[PairingScreen] No paired device, showing pairing screen.");
       setCheckingDevices(false);
     })();
   }, []);
 
-  const onPairPress = async () => {
-    if (!piIp.trim()) {
-      Alert.alert("Error", "Please enter your Pi's IP address");
-      return;
-    }
-
+  const claimDevice = async (deviceId: string) => {
     setLoading(true);
-
     try {
-      // Step 1: Fetch device_id from the Pi
-      const piUrl = `http://${piIp.trim()}:8000/device-id`;
-      let deviceId: string;
-
-      try {
-        const piRes = await fetch(piUrl, { method: "GET" });
-        if (!piRes.ok) throw new Error(`Pi responded with ${piRes.status}`);
-        const piData = await piRes.json();
-        deviceId = piData.device_id;
-        if (!deviceId) throw new Error("No device_id in response");
-      } catch (err: any) {
-        Alert.alert(
-          "Can't Reach Pi",
-          `Make sure your Pi is running and accessible at ${piIp}:8000.\n\n${err.message}`,
-        );
-        return;
-      }
-
-      // Step 2: Claim the device on our backend
       const token = await getToken();
       const claimRes = await fetch(DEVICES_CLAIM_URL, {
         method: "POST",
@@ -96,13 +85,45 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
         throw new Error(errData.error || `Server returned ${claimRes.status}`);
       }
 
-      Alert.alert("Success!", `Device ${deviceId} paired successfully.`, [
+      Alert.alert("Success!", `Device paired successfully.`, [
         { text: "Continue", onPress: onPaired },
       ]);
     } catch (err: any) {
       Alert.alert("Pairing Failed", err.message);
+      setScanning(false);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBarcodeScan = ({ data }: { data: string }) => {
+    console.log("[PairingScreen] ✅ Barcode scanned! Raw data:", data);
+    if (loading) {
+      console.log("[PairingScreen] Ignoring scan — already loading");
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(data);
+      console.log("[PairingScreen] Parsed QR JSON:", parsed);
+      if (!parsed.device_id || typeof parsed.device_id !== "string") {
+        console.log("[PairingScreen] No valid device_id in QR data");
+        Alert.alert("Invalid QR Code", "QR code doesn't contain a valid device_id.", [
+          { text: "Try Again", onPress: () => setScanning(true) },
+        ]);
+        setScanning(false);
+        return;
+      }
+
+      console.log("[PairingScreen] Claiming device_id:", parsed.device_id);
+      setScanning(false);
+      claimDevice(parsed.device_id);
+    } catch (err: any) {
+      console.log("[PairingScreen] QR parse error:", err.message, "raw:", data);
+      Alert.alert("Invalid QR Code", "Could not read the QR code. Make sure you're scanning a WALADI device QR.", [
+        { text: "Try Again", onPress: () => setScanning(true) },
+      ]);
+      setScanning(false);
     }
   };
 
@@ -115,87 +136,100 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
     );
   }
 
+  // Camera permission not yet granted
+  if (!permission?.granted) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centeredContent}>
+          <View style={styles.iconCircle}>
+            <Ionicons name="camera-outline" size={48} color={COLORS.white} />
+          </View>
+          <Text style={styles.title}>Camera Access Needed</Text>
+          <Text style={styles.subtitle}>
+            We need camera access to scan the QR code on your WALADI device.
+          </Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
+            <Text style={styles.primaryButtonText}>Allow Camera</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // QR scanner active
+  if (scanning) {
+    return (
+      <View style={styles.scannerContainer}>
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+          onBarcodeScanned={loading ? undefined : handleBarcodeScan}
+        />
+
+        {/* Overlay */}
+        <SafeAreaView style={styles.scannerOverlay}>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => setScanning(false)}
+          >
+            <Ionicons name="close" size={28} color={COLORS.white} />
+          </TouchableOpacity>
+
+          <View style={styles.scannerMiddle}>
+            <View style={styles.scanFrame} />
+            <Text style={styles.scanHint}>
+              Point at the QR code on your WALADI device
+            </Text>
+          </View>
+
+          {loading && (
+            <View style={styles.scannerLoading}>
+              <ActivityIndicator size="large" color={COLORS.white} />
+              <Text style={styles.scannerLoadingText}>Pairing device...</Text>
+            </View>
+          )}
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  // Default: instructions + scan button
   return (
     <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.flex}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
+      <View style={styles.centeredContent}>
+        {/* Icon */}
+        <View style={styles.iconCircle}>
+          <Ionicons name="qr-code-outline" size={48} color={COLORS.white} />
+        </View>
+        <Text style={styles.title}>Pair Your Device</Text>
+        <Text style={styles.subtitle}>
+          Scan the QR code on your WALADI baby monitor to connect.
+        </Text>
+
+        {/* Scan Button */}
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => setScanning(true)}
         >
-          {/* Icon */}
-          <View style={styles.iconContainer}>
-            <View style={styles.iconCircle}>
-              <Ionicons name="wifi" size={48} color={COLORS.white} />
-            </View>
-            <Text style={styles.title}>Pair Your Device</Text>
-            <Text style={styles.subtitle}>
-              Connect your WALADI baby monitor to start receiving sensor data.
-            </Text>
-          </View>
+          <Ionicons
+            name="scan"
+            size={22}
+            color={COLORS.white}
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.primaryButtonText}>Scan QR Code</Text>
+        </TouchableOpacity>
 
-          {/* Form */}
-          <View style={styles.formContainer}>
-            <Text style={styles.label}>Raspberry Pi IP Address</Text>
-            <View style={styles.inputContainer}>
-              <Ionicons
-                name="globe-outline"
-                size={20}
-                color={COLORS.gray}
-                style={styles.inputIcon}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. 172.20.10.2"
-                placeholderTextColor={COLORS.textDisabled}
-                value={piIp}
-                onChangeText={setPiIp}
-                keyboardType="numeric"
-                autoCorrect={false}
-              />
-            </View>
-
-            <Text style={styles.hint}>
-              Make sure your phone and the Pi are on the same Wi-Fi network.
-            </Text>
-
-            {/* Pair Button */}
-            <TouchableOpacity
-              style={[
-                styles.pairButton,
-                (!piIp.trim() || loading) && styles.buttonDisabled,
-              ]}
-              onPress={onPairPress}
-              disabled={!piIp.trim() || loading}
-            >
-              {loading ? (
-                <ActivityIndicator color={COLORS.white} />
-              ) : (
-                <>
-                  <Ionicons
-                    name="link"
-                    size={20}
-                    color={COLORS.white}
-                    style={{ marginRight: 8 }}
-                  />
-                  <Text style={styles.pairButtonText}>Pair Device</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Steps */}
-          <View style={styles.stepsContainer}>
-            <Text style={styles.stepsTitle}>How it works</Text>
-            <Step number={1} text="Power on your WALADI device" />
-            <Step number={2} text="Connect it to the same Wi-Fi network" />
-            <Step number={3} text="Enter the Pi's IP address above" />
-            <Step number={4} text='Tap "Pair Device" to connect' />
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        {/* Steps */}
+        <View style={styles.stepsContainer}>
+          <Text style={styles.stepsTitle}>How it works</Text>
+          <Step number={1} text="Power on your WALADI device" />
+          <Step number={2} text="Find the QR code on the device" />
+          <Step number={3} text='Tap "Scan QR Code" above' />
+          <Step number={4} text="Point your camera at the QR code" />
+        </View>
+      </View>
     </SafeAreaView>
   );
 };
@@ -217,13 +251,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  flex: {
+  centeredContent: {
     flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: LAYOUT.spacing.lg,
     justifyContent: "center",
+    alignItems: "center",
+    padding: LAYOUT.spacing.lg,
   },
   loadingContainer: {
     flex: 1,
@@ -235,10 +267,6 @@ const styles = StyleSheet.create({
     marginTop: LAYOUT.spacing.md,
     color: COLORS.textSecondary,
     fontSize: 14,
-  },
-  iconContainer: {
-    alignItems: "center",
-    marginBottom: 32,
   },
   iconCircle: {
     width: 96,
@@ -266,68 +294,30 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
     paddingHorizontal: LAYOUT.spacing.lg,
+    marginBottom: 24,
   },
-  formContainer: {
-    backgroundColor: COLORS.white,
-    borderRadius: LAYOUT.borderRadius.lg,
-    padding: LAYOUT.spacing.lg,
-    shadowColor: COLORS.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
-    marginBottom: LAYOUT.spacing.lg,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.textPrimary,
-    marginBottom: LAYOUT.spacing.sm,
-  },
-  inputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: COLORS.lightGray,
-    borderRadius: LAYOUT.borderRadius.sm,
-    paddingHorizontal: LAYOUT.spacing.md,
-    height: 52,
-    marginBottom: LAYOUT.spacing.sm,
-  },
-  inputIcon: {
-    marginRight: LAYOUT.spacing.sm,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    color: COLORS.textPrimary,
-  },
-  hint: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginBottom: LAYOUT.spacing.md,
-  },
-  pairButton: {
+  primaryButton: {
     backgroundColor: COLORS.primary,
     borderRadius: LAYOUT.borderRadius.sm,
     height: 52,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 32,
     shadowColor: COLORS.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+    marginBottom: 32,
   },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  pairButtonText: {
+  primaryButtonText: {
     color: COLORS.white,
     fontSize: 16,
     fontWeight: "700",
   },
   stepsContainer: {
+    alignSelf: "stretch",
     paddingHorizontal: LAYOUT.spacing.sm,
   },
   stepsTitle: {
@@ -359,6 +349,52 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: COLORS.textSecondary,
+  },
+
+  // Scanner styles
+  scannerContainer: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "space-between",
+  },
+  closeButton: {
+    alignSelf: "flex-end",
+    margin: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  scannerMiddle: {
+    alignItems: "center",
+  },
+  scanFrame: {
+    width: 240,
+    height: 240,
+    borderWidth: 2,
+    borderColor: COLORS.white,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
+  scanHint: {
+    color: COLORS.white,
+    fontSize: 14,
+    textAlign: "center",
+    paddingHorizontal: 32,
+  },
+  scannerLoading: {
+    alignItems: "center",
+    marginBottom: 48,
+  },
+  scannerLoadingText: {
+    color: COLORS.white,
+    marginTop: 8,
+    fontSize: 14,
   },
 });
 
