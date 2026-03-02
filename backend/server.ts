@@ -142,6 +142,63 @@ app.get("/api/sensor-data", requireAuth(), async (req: any, res) => {
   }
 });
 
+// ── GET /api/analytics (auth required) ──
+// Returns time-bucketed averages for all vitals.
+//
+// Query params:
+//   range  → "24h" (default) | "7d" | "30d"
+//
+// Bucket sizes:
+//   24h  → 1-hour buckets
+//   7d   → 6-hour buckets
+//   30d  → 1-day buckets
+app.get("/api/analytics", requireAuth(), async (req: any, res) => {
+  const { userId } = getAuth(req);
+  const range = (req.query.range as string) || "24h";
+
+  let interval: string;
+  let bucket: string;
+
+  switch (range) {
+    case "7d":
+      interval = "7 days";
+      bucket = "6 hours";
+      break;
+    case "30d":
+      interval = "30 days";
+      bucket = "1 day";
+      break;
+    case "24h":
+    default:
+      interval = "24 hours";
+      bucket = "1 hour";
+      break;
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         time_bucket($1::interval, time)   AS bucket,
+         AVG(heart_rate_bpm)               AS avg_heart_rate,
+         AVG(breathing_rate_bpm)           AS avg_breathing_rate,
+         AVG(body_temperature_c)           AS avg_body_temp,
+         AVG(room_temperature_c)           AS avg_room_temp,
+         AVG(room_humidity_rh)             AS avg_humidity,
+         COUNT(*)                          AS sample_count
+       FROM sensor_readings
+       WHERE user_id = $2
+         AND time >= NOW() - $3::interval
+       GROUP BY bucket
+       ORDER BY bucket ASC`,
+      [bucket, userId, interval],
+    );
+    return res.json(result.rows);
+  } catch (err) {
+    console.error("[server] /api/analytics error:", err);
+    return res.status(500).json({ error: "Failed to fetch analytics" });
+  }
+});
+
 export function startServer(): void {
   app.listen(PORT, () => {
     console.log(`[server] Listening on http://0.0.0.0:${PORT}`);
@@ -149,5 +206,6 @@ export function startServer(): void {
     console.log(`[server]   POST /api/devices/claim`);
     console.log(`[server]   GET  /api/devices`);
     console.log(`[server]   GET  /api/sensor-data`);
+    console.log(`[server]   GET  /api/analytics?range=24h|7d|30d`);
   });
 }
