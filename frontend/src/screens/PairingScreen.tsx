@@ -33,9 +33,9 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
       console.log("[PairingScreen] DEVICES_URL =", DEVICES_URL);
       const controller = new AbortController();
       const timeout = setTimeout(() => {
-        console.log("[PairingScreen] Fetch timed out after 15s");
+        console.log("[PairingScreen] Fetch timed out after 60s");
         controller.abort();
-      }, 15000);
+      }, 60000);
       try {
         const token = await getToken();
         console.log("[PairingScreen] Got auth token:", token ? "yes" : "NO TOKEN");
@@ -49,6 +49,7 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
           const devices = await res.json();
           console.log("[PairingScreen] Devices found:", devices.length, devices);
           if (devices.length > 0) {
+            console.log("[PairingScreen] ✅ Already paired — skipping to dashboard");
             onPaired();
             return;
           }
@@ -67,8 +68,14 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
 
   const claimDevice = async (deviceId: string) => {
     setLoading(true);
+    console.log("[PairingScreen] Claiming device:", deviceId, "URL:", DEVICES_CLAIM_URL);
     try {
       const token = await getToken();
+      console.log("[PairingScreen] Auth token for claim:", token ? "yes" : "NO TOKEN");
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+
       const claimRes = await fetch(DEVICES_CLAIM_URL, {
         method: "POST",
         headers: {
@@ -79,17 +86,24 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
           device_id: deviceId,
           name: "My Baby Monitor",
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
+
+      console.log("[PairingScreen] Claim response status:", claimRes.status);
+      const resBody = await claimRes.text();
+      console.log("[PairingScreen] Claim response body:", resBody);
 
       if (!claimRes.ok) {
-        const errData = await claimRes.json().catch(() => ({}));
-        throw new Error(errData.error || `Server returned ${claimRes.status}`);
+        const errData = JSON.parse(resBody).error || `Server returned ${claimRes.status}`;
+        throw new Error(errData);
       }
 
       Alert.alert("Success!", `Device paired successfully.`, [
         { text: "Continue", onPress: onPaired },
       ]);
     } catch (err: any) {
+      console.log("[PairingScreen] Claim error:", err.message || err);
       Alert.alert("Pairing Failed", err.message);
       setScanning(false);
     } finally {
