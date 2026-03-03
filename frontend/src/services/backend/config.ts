@@ -12,13 +12,10 @@ export const EMQX_URL = `wss://${EMQX_HOST}:${EMQX_PORT}/mqtt`;
 export const EMQX_USERNAME = "waladi_app";
 export const EMQX_PASSWORD = "123456";
 export const MQTT_TOPIC = "state/baby";
+export const CAMERA_TOPIC = "camera/snapshot";
 
-// ── Node.js REST API (running locally) ──
-// Use your machine's local IP on the same network as your phone.
-// Find it with `ipconfig` → look for your Wi-Fi IPv4 address.
-export const BACKEND_IP = "172.20.10.9";
-export const BACKEND_URL = `http://${BACKEND_IP}:3000`;
-
+// ── Node.js REST API (deployed on Render) ──
+export const BACKEND_URL = "https://waladi-mobile.onrender.com";
 export const READINGS_URL = `${BACKEND_URL}/api/readings`;
 export const DEVICES_CLAIM_URL = `${BACKEND_URL}/api/devices/claim`;
 export const DEVICES_URL = `${BACKEND_URL}/api/devices`;

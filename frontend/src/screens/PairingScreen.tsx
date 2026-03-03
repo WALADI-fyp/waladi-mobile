@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingDevices, setCheckingDevices] = useState(true);
+  const scanProcessed = useRef(false);
 
   // On mount, check if user already has a paired device
   useEffect(() => {
@@ -32,9 +33,9 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
       console.log("[PairingScreen] DEVICES_URL =", DEVICES_URL);
       const controller = new AbortController();
       const timeout = setTimeout(() => {
-        console.log("[PairingScreen] Fetch timed out after 5s");
+        console.log("[PairingScreen] Fetch timed out after 15s");
         controller.abort();
-      }, 5000);
+      }, 15000);
       try {
         const token = await getToken();
         console.log("[PairingScreen] Got auth token:", token ? "yes" : "NO TOKEN");
@@ -97,9 +98,14 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
   };
 
   const handleBarcodeScan = ({ data }: { data: string }) => {
+    // Prevent duplicate scans — ref is synchronous, unlike state
+    if (scanProcessed.current) return;
+    scanProcessed.current = true;
+
     console.log("[PairingScreen] ✅ Barcode scanned! Raw data:", data);
     if (loading) {
       console.log("[PairingScreen] Ignoring scan — already loading");
+      scanProcessed.current = false;
       return;
     }
 
@@ -109,7 +115,7 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
       if (!parsed.device_id || typeof parsed.device_id !== "string") {
         console.log("[PairingScreen] No valid device_id in QR data");
         Alert.alert("Invalid QR Code", "QR code doesn't contain a valid device_id.", [
-          { text: "Try Again", onPress: () => setScanning(true) },
+          { text: "Try Again", onPress: () => { scanProcessed.current = false; setScanning(true); } },
         ]);
         setScanning(false);
         return;
@@ -121,7 +127,7 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
     } catch (err: any) {
       console.log("[PairingScreen] QR parse error:", err.message, "raw:", data);
       Alert.alert("Invalid QR Code", "Could not read the QR code. Make sure you're scanning a WALADI device QR.", [
-        { text: "Try Again", onPress: () => setScanning(true) },
+        { text: "Try Again", onPress: () => { scanProcessed.current = false; setScanning(true); } },
       ]);
       setScanning(false);
     }
@@ -210,7 +216,7 @@ const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired }) => {
         {/* Scan Button */}
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => setScanning(true)}
+          onPress={() => { scanProcessed.current = false; setScanning(true); }}
         >
           <Ionicons
             name="scan"
