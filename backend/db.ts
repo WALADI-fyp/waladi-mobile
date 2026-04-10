@@ -1,38 +1,42 @@
 /**
- * Database module — PostgreSQL / TimescaleDB connection pool.
- *
- * Exposes a `pool` for queries and `initDb()` to create the
- * sensor_readings hypertable if it doesn't already exist.
+ * Database connection — Timescale Cloud.
  */
-
 import { Pool } from "pg";
-import { DB_CONFIG } from "./config";
+import { DATABASE_URL } from "./config";
 
-export const pool = new Pool(DB_CONFIG);
+function normalizeConnectionString(rawUrl: string): string {
+  if (!rawUrl.includes("sslmode=require")) {
+    return rawUrl;
+  }
 
-const CREATE_TABLE_SQL = `
-  CREATE TABLE IF NOT EXISTS sensor_readings (
-    time                TIMESTAMPTZ      NOT NULL,
-    source              TEXT             NOT NULL,
-    heart_rate_bpm      DOUBLE PRECISION,
-    breathing_rate_bpm  DOUBLE PRECISION,
-    room_temperature_c  DOUBLE PRECISION,
-    body_temperature_c  DOUBLE PRECISION,
-    room_humidity_rh    DOUBLE PRECISION,
-    mock_fields         TEXT[]
-  );
-`;
+  if (rawUrl.includes("uselibpqcompat=")) {
+    return rawUrl;
+  }
 
-const CREATE_HYPERTABLE_SQL = `
-  SELECT create_hypertable('sensor_readings', 'time', if_not_exists => TRUE);
-`;
+  const separator = rawUrl.includes("?") ? "&" : "?";
+  return `${rawUrl}${separator}uselibpqcompat=true`;
+}
 
-export async function initDb(): Promise<void> {
+export const pool = new Pool({
+  connectionString: normalizeConnectionString(DATABASE_URL),
+  ssl: { rejectUnauthorized: false },
+});
+
+pool.on("error", (err) => {
+  console.error("[db] Unexpected idle client error:", err);
+});
+
+export async function verifyDatabaseConnection(): Promise<void> {
   const client = await pool.connect();
   try {
-    await client.query(CREATE_TABLE_SQL);
-    await client.query(CREATE_HYPERTABLE_SQL);
-    console.log("[db] sensor_readings hypertable ready");
+    const result = await client.query<{
+      current_database: string;
+      current_user: string;
+    }>("SELECT current_database(), current_user");
+    const row = result.rows[0];
+    console.log(
+      `[db] Connected to database "${row.current_database}" as "${row.current_user}"`,
+    );
   } finally {
     client.release();
   }

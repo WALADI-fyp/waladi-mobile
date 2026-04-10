@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -8,14 +8,7 @@ import {
 } from "react-native";
 import { COLORS, LAYOUT } from "../../constants";
 import PulseView from "../common/PulseView";
-
-// ── Pi camera service endpoints ──
-// Uses the same Pi IP as the backend config (172.20.10.2).
-// The camera service runs on port 8001.
-const PI_IP = "172.20.10.2";
-const SNAPSHOT_URL = `http://${PI_IP}:8001/snapshot`;
-const STATUS_URL = `http://${PI_IP}:8001/status`;
-const FPS = 20;
+import { connectToCameraStream } from "../../services/backend/cameraClient";
 
 interface CameraStreamProps {
   width?: number;
@@ -27,33 +20,35 @@ const CameraStream: React.FC<CameraStreamProps> = ({
   height = 180,
 }) => {
   const [uri, setUri] = useState<string | null>(null);
-  const [available, setAvailable] = useState<boolean | null>(null);
-  const frameCount = useRef(0);
+  const [connected, setConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // ── Check if the Pi camera is reachable ──
   useEffect(() => {
-    fetch(STATUS_URL)
-      .then((r) => r.json())
-      .then((d) => setAvailable(d.camera_available))
-      .catch(() => setAvailable(false));
+    const disconnect = connectToCameraStream(
+      (base64Uri) => {
+        setUri(base64Uri);
+        if (!connected) setConnected(true);
+        setError(null);
+      },
+      (err) => {
+        console.warn("[CameraStream] error:", err.message);
+        setError(err.message);
+      },
+    );
+
+    // Mark as connected after a short delay so "connecting" shows briefly
+    const timeout = setTimeout(() => {
+      // If still no frame after 5s, likely no camera publishing
+    }, 5000);
+
+    return () => {
+      clearTimeout(timeout);
+      disconnect();
+    };
   }, []);
 
-  // ── Poll snapshot frames when available ──
-  useEffect(() => {
-    if (!available) return;
-
-    const poll = () => {
-      frameCount.current += 1;
-      setUri(`${SNAPSHOT_URL}?f=${frameCount.current}`);
-    };
-
-    poll();
-    const id = setInterval(poll, 1000 / FPS);
-    return () => clearInterval(id);
-  }, [available]);
-
-  // ── Loading state ──
-  if (available === null) {
+  // ── Loading state (no frame yet, no error) ──
+  if (!uri && !error) {
     return (
       <View style={[styles.container, { width, height }]}>
         <ActivityIndicator color={COLORS.primary} />
@@ -62,21 +57,22 @@ const CameraStream: React.FC<CameraStreamProps> = ({
     );
   }
 
-  // ── Unavailable state ──
-  if (!available) {
+  // ── Error state ──
+  if (error && !uri) {
     return (
       <View style={[styles.container, { width, height }]}>
         <Text style={styles.unavailableText}>Camera unavailable</Text>
+        <Text style={styles.errorDetail}>{error}</Text>
       </View>
     );
   }
 
-  // ── Live stream ──
+  // ── Live stream (base64 JPEG frames) ──
   return (
     <View style={[styles.container, { width, height }]}>
       {uri && (
         <Image
-          source={{ uri, cache: "reload" }}
+          source={{ uri }}
           style={{ width, height }}
           resizeMode="contain"
         />
@@ -108,6 +104,11 @@ const styles = StyleSheet.create({
   unavailableText: {
     color: COLORS.white,
     fontSize: 13,
+  },
+  errorDetail: {
+    color: COLORS.gray,
+    fontSize: 10,
+    marginTop: 4,
   },
   liveBadge: {
     position: "absolute",
