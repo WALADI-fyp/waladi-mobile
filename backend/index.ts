@@ -8,4 +8,7 @@
 
 import { startServer } from "./server";
 
-startServer();
+startServer().catch((err) => {
+  console.error("[startup] Failed to start backend:", err);
+  process.exit(1);
+});

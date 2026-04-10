@@ -20,3 +20,4 @@ export const READINGS_URL = `${BACKEND_URL}/api/readings`;
 export const DEVICES_CLAIM_URL = `${BACKEND_URL}/api/devices/claim`;
 export const DEVICES_URL = `${BACKEND_URL}/api/devices`;
 export const SENSOR_DATA_URL = `${BACKEND_URL}/api/sensor-data`;
+export const ANALYTICS_URL = `${BACKEND_URL}/api/analytics`;

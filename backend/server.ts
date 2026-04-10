@@ -12,7 +12,7 @@ import express from "express";
 import cors from "cors";
 import { clerkMiddleware, requireAuth, getAuth } from "@clerk/express";
 import { PORT } from "./config";
-import { pool } from "./db";
+import { pool, verifyDatabaseConnection } from "./db";
 
 const app = express();
 app.use(cors());
@@ -199,7 +199,9 @@ app.get("/api/analytics", requireAuth(), async (req: any, res) => {
   }
 });
 
-export function startServer(): void {
+export async function startServer(): Promise<void> {
+  await verifyDatabaseConnection();
+
   app.listen(PORT, () => {
     console.log(`[server] Listening on http://0.0.0.0:${PORT}`);
     console.log(`[server]   GET  /api/readings`);
