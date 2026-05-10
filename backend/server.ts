@@ -142,6 +142,31 @@ app.get("/api/sensor-data", requireAuth(), async (req: any, res) => {
   }
 });
 
+// ── GET /api/alerts/cry (auth required) ──
+// Returns latest cry alerts for the authenticated user.
+app.get("/api/alerts/cry", requireAuth(), async (req: any, res) => {
+  const { userId } = getAuth(req);
+  const limit = Math.min(
+    parseInt((req.query.limit as string) || "50", 10),
+    200,
+  );
+
+  try {
+    const result = await pool.query(
+      `SELECT *
+       FROM cry_alerts
+       WHERE user_id = $1
+       ORDER BY started_at DESC
+       LIMIT $2`,
+      [userId, limit],
+    );
+    return res.json(result.rows);
+  } catch (err) {
+    console.error("[server] /api/alerts/cry error:", err);
+    return res.status(500).json({ error: "Failed to fetch cry alerts" });
+  }
+});
+
 // ── GET /api/analytics (auth required) ──
 // Returns time-bucketed averages for all vitals.
 //
@@ -208,6 +233,7 @@ export async function startServer(): Promise<void> {
     console.log(`[server]   POST /api/devices/claim`);
     console.log(`[server]   GET  /api/devices`);
     console.log(`[server]   GET  /api/sensor-data`);
+    console.log(`[server]   GET  /api/alerts/cry`);
     console.log(`[server]   GET  /api/analytics?range=24h|7d|30d`);
   });
 }

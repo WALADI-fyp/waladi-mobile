@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -7,61 +7,406 @@ import {
   SafeAreaView,
   TouchableOpacity,
   RefreshControl,
+  Alert as NativeAlert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useAuth } from "@clerk/clerk-expo";
+import * as Haptics from "expo-haptics";
 import { COLORS, LAYOUT } from "../constants";
-import { DUMMY_ALERTS } from "../constants/dummy-data";
 import Header from "../components/common/Header";
 import AlertItem from "../components/alerts/AlertItem";
-import { Alert as AlertType } from "../types/alert.types";
-import * as Haptics from "expo-haptics";
+import {
+  Alert as AlertType,
+  AlertSeverity,
+  AlertStatus,
+} from "../types/alert.types";
+import { CRY_ALERTS_URL } from "../services/backend/config";
+import { connectToCryAlertStream } from "../services/backend/cryAlertClient";
+import { CryAlertPayload } from "../services/backend/types";
 
 type FilterType = "all" | "critical" | "warning" | "info";
 
+const MAX_ALERTS = 50;
+
+function parseDateValue(value: unknown): Date | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseNumberValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.length > 0) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function parseStringValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const v = value.trim();
+  return v.length > 0 ? v : undefined;
+}
+
+function parseSeverity(value: unknown, isActive: boolean): AlertSeverity {
+  if (value === "critical" || value === "warning" || value === "info") {
+    return value;
+  }
+  return isActive ? "critical" : "warning";
+}
+
+function parseStatus(value: unknown, isActive: boolean): AlertStatus {
+  if (value === "unread" || value === "read" || value === "dismissed") {
+    return value;
+  }
+  return isActive ? "unread" : "read";
+}
+
+function formatDateTime(date: Date): string {
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatProb(prob?: number): string | null {
+  if (prob === undefined || !Number.isFinite(prob)) return null;
+  return `${Math.round(prob * 100)}%`;
+}
+
+function buildCryMessage(
+  startedAt: Date,
+  endedAt: Date | null,
+  startProb?: number,
+  endProb?: number,
+): string {
+  const parts: string[] = [];
+  parts.push(`Started at ${formatDateTime(startedAt)}.`);
+
+  const startLabel = formatProb(startProb);
+  if (startLabel) {
+    parts.push(`Start confidence: ${startLabel}.`);
+  }
+
+  if (!endedAt) {
+    parts.push("Still crying...");
+    return parts.join(" ");
+  }
+
+  parts.push(`Ended at ${formatDateTime(endedAt)}.`);
+  const endLabel = formatProb(endProb);
+  if (endLabel) {
+    parts.push(`End confidence: ${endLabel}.`);
+  }
+
+  return parts.join(" ");
+}
+
+function sortAndCap(alerts: AlertType[]): AlertType[] {
+  return [...alerts]
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    .slice(0, MAX_ALERTS);
+}
+
+function mergeFetchedWithActiveLive(
+  fetched: AlertType[],
+  current: AlertType[],
+): AlertType[] {
+  const byId = new Map<string, AlertType>();
+
+  for (const alert of fetched) {
+    byId.set(alert.id, alert);
+  }
+
+  for (const alert of current) {
+    if (!byId.has(alert.id)) {
+      byId.set(alert.id, alert);
+    }
+  }
+
+  return sortAndCap(Array.from(byId.values()));
+}
+
+function mapCryAlertRowToAlert(raw: unknown): AlertType | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const row = raw as Record<string, unknown>;
+  const startedAt =
+    parseDateValue(row.started_at) ??
+    parseDateValue(row.startedAt) ??
+    parseDateValue(row.created_at) ??
+    new Date();
+  const endedAt = parseDateValue(row.ended_at) ?? parseDateValue(row.endedAt);
+  const isActive = endedAt === null;
+
+  const alertId =
+    parseStringValue(row.alert_id) ??
+    parseStringValue(row.alertId) ??
+    parseStringValue(row.id);
+  const deviceId =
+    parseStringValue(row.device_id) ??
+    parseStringValue(row.deviceId) ??
+    "unknown-device";
+  const id = alertId ?? `${deviceId}:${startedAt.toISOString()}`;
+
+  const startProb =
+    parseNumberValue(row.prob_start) ??
+    parseNumberValue(row.start_prob) ??
+    parseNumberValue(row.startProb) ??
+    parseNumberValue(row.probability_start) ??
+    parseNumberValue(row.prob);
+  const endProb =
+    parseNumberValue(row.prob_end) ??
+    parseNumberValue(row.end_prob) ??
+    parseNumberValue(row.endProb) ??
+    parseNumberValue(row.probability_end);
+
+  return {
+    id,
+    title: isActive ? "Crying in progress" : "Crying detected",
+    message: buildCryMessage(startedAt, endedAt, startProb, endProb),
+    severity: parseSeverity(row.severity, isActive),
+    category: "sound",
+    status: parseStatus(row.status, isActive),
+    timestamp: startedAt,
+    icon: "volume-high-outline",
+    deviceId,
+    alertId,
+    startedAt,
+    endedAt,
+    isActive,
+    startProb,
+    endProb,
+  };
+}
+
+function applyLiveCryPayload(
+  current: AlertType[],
+  payload: CryAlertPayload,
+): AlertType[] {
+  const eventTime = payload.ts ? new Date(payload.ts) : new Date();
+  const eventAlertId = payload.alert_id?.trim();
+  const eventDeviceId = payload.device_id;
+  const prob = parseNumberValue(payload.prob);
+
+  if (payload.event === "cry_start") {
+    const id = eventAlertId ?? `active:${eventDeviceId}`;
+    const index = current.findIndex(
+      (a) =>
+        a.id === id ||
+        (!!eventAlertId && a.alertId === eventAlertId) ||
+        (!eventAlertId && a.isActive && a.deviceId === eventDeviceId),
+    );
+
+    if (index === -1) {
+      const newAlert: AlertType = {
+        id,
+        title: "Crying in progress",
+        message: buildCryMessage(eventTime, null, prob),
+        severity: "critical",
+        category: "sound",
+        status: "unread",
+        timestamp: eventTime,
+        icon: "volume-high-outline",
+        deviceId: eventDeviceId,
+        alertId: eventAlertId,
+        startedAt: eventTime,
+        endedAt: null,
+        isActive: true,
+        startProb: prob,
+      };
+      return sortAndCap([newAlert, ...current]);
+    }
+
+    const existing = current[index];
+    const startedAt = existing.startedAt ?? existing.timestamp ?? eventTime;
+    const updated: AlertType = {
+      ...existing,
+      id,
+      title: "Crying in progress",
+      message: buildCryMessage(startedAt, null, existing.startProb ?? prob),
+      severity: "critical",
+      status: "unread",
+      deviceId: eventDeviceId,
+      alertId: eventAlertId ?? existing.alertId,
+      startedAt,
+      endedAt: null,
+      isActive: true,
+      startProb: existing.startProb ?? prob,
+    };
+
+    const next = [...current];
+    next[index] = updated;
+    return sortAndCap(next);
+  }
+
+  // cry_end
+  const index = current.findIndex(
+    (a) =>
+      (!!eventAlertId && (a.id === eventAlertId || a.alertId === eventAlertId)) ||
+      (a.isActive && a.deviceId === eventDeviceId),
+  );
+
+  if (index === -1) {
+    const orphanEndAlert: AlertType = {
+      id: eventAlertId ?? `end:${eventDeviceId}:${eventTime.getTime()}`,
+      title: "Crying ended",
+      message: `Ended at ${formatDateTime(eventTime)}.`,
+      severity: "info",
+      category: "sound",
+      status: "unread",
+      timestamp: eventTime,
+      icon: "volume-high-outline",
+      deviceId: eventDeviceId,
+      alertId: eventAlertId,
+      startedAt: eventTime,
+      endedAt: eventTime,
+      isActive: false,
+      endProb: prob,
+    };
+    return sortAndCap([orphanEndAlert, ...current]);
+  }
+
+  const existing = current[index];
+  const startedAt = existing.startedAt ?? existing.timestamp ?? eventTime;
+  const updated: AlertType = {
+    ...existing,
+    title: "Crying ended",
+    message: buildCryMessage(startedAt, eventTime, existing.startProb, prob),
+    severity: "warning",
+    status: "unread",
+    alertId: eventAlertId ?? existing.alertId,
+    startedAt,
+    endedAt: eventTime,
+    isActive: false,
+    endProb: prob,
+  };
+
+  const next = [...current];
+  next[index] = updated;
+  return sortAndCap(next);
+}
+
 const AlertsScreen = () => {
-  const [alerts, setAlerts] = useState<AlertType[]>(DUMMY_ALERTS);
+  const { getToken } = useAuth();
+  const [alerts, setAlerts] = useState<AlertType[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [refreshing, setRefreshing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const unreadCount = alerts.filter((a) => a.status === "unread").length;
 
-  const filteredAlerts = alerts.filter((alert) => {
-    if (activeFilter === "all") return true;
-    return alert.severity === activeFilter;
-  });
+  const filteredAlerts = useMemo(() => {
+    return alerts.filter((alert) => {
+      if (activeFilter === "all") return true;
+      return alert.severity === activeFilter;
+    });
+  }, [alerts, activeFilter]);
+
+  const fetchAlerts = useCallback(async () => {
+    try {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Missing auth token");
+      }
+
+      const response = await fetch(`${CRY_ALERTS_URL}?limit=${MAX_ALERTS}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(body || `Server returned ${response.status}`);
+      }
+
+      const rows = (await response.json()) as unknown[];
+      const fetchedAlerts = rows
+        .map(mapCryAlertRowToAlert)
+        .filter((alert): alert is AlertType => alert !== null);
+
+      setAlerts((current) => mergeFetchedWithActiveLive(fetchedAlerts, current));
+      setFetchError(null);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch cry alerts";
+      setFetchError(message);
+      console.error("[AlertsScreen] fetch cry alerts error:", message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    fetchAlerts();
+  }, [fetchAlerts]);
+
+  useEffect(() => {
+    const disconnect = connectToCryAlertStream(
+      (payload) => {
+        setAlerts((current) => applyLiveCryPayload(current, payload));
+      },
+      (err) => {
+        console.error("[AlertsScreen] cry stream error:", err.message);
+      },
+    );
+
+    return () => {
+      disconnect();
+    };
+  }, []);
 
   const handleAlertPress = (alert: AlertType) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    // Mark as read
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setAlerts((prev) =>
-      prev.map((a) => (a.id === alert.id ? { ...a, status: "read" as const } : a))
+      prev.map((a) => (a.id === alert.id ? { ...a, status: "read" } : a)),
     );
-    console.log("Alert pressed:", alert.title);
   };
 
   const handleDismiss = (alert: AlertType) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
   };
 
   const handleMarkAllRead = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAlerts((prev) => prev.map((a) => ({ ...a, status: "read" as const })));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setAlerts((prev) => prev.map((a) => ({ ...a, status: "read" })));
   };
 
   const handleClearAll = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setAlerts([]);
+    if (alerts.length === 0) return;
+    NativeAlert.alert("Clear all alerts?", "This clears alerts from this session.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Clear",
+        style: "destructive",
+        onPress: () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+          setAlerts([]);
+        },
+      },
+    ]);
   };
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // Simulate fetching new alerts
-    setTimeout(() => {
-      setAlerts(DUMMY_ALERTS);
-      setRefreshing(false);
-    }, 1000);
-  }, []);
+    await fetchAlerts();
+    setRefreshing(false);
+  }, [fetchAlerts]);
 
   const FilterButton = ({
     filter,
@@ -78,7 +423,7 @@ const AlertsScreen = () => {
         activeFilter === filter && styles.filterButtonActive,
       ]}
       onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
         setActiveFilter(filter);
       }}
     >
@@ -110,7 +455,6 @@ const AlertsScreen = () => {
     </TouchableOpacity>
   );
 
-  // Header right component
   const HeaderRight = (
     <TouchableOpacity
       style={styles.headerButton}
@@ -129,7 +473,15 @@ const AlertsScreen = () => {
     <SafeAreaView style={styles.safeArea}>
       <Header title="Alerts" rightComponent={HeaderRight} />
 
-      {/* Summary Card */}
+      {fetchError && (
+        <View style={styles.errorBanner}>
+          <Ionicons name="alert-circle-outline" size={16} color={COLORS.error} />
+          <Text style={styles.errorText} numberOfLines={2}>
+            {fetchError}
+          </Text>
+        </View>
+      )}
+
       <View style={styles.summaryCard}>
         <View style={styles.summaryItem}>
           <View style={[styles.summaryIcon, { backgroundColor: "#FFEBEE" }]}>
@@ -164,7 +516,6 @@ const AlertsScreen = () => {
         </View>
       </View>
 
-      {/* Filter Tabs */}
       <View style={styles.filterContainer}>
         <ScrollView
           horizontal
@@ -190,7 +541,6 @@ const AlertsScreen = () => {
         </ScrollView>
       </View>
 
-      {/* Alerts List */}
       <ScrollView
         style={styles.container}
         showsVerticalScrollIndicator={false}
@@ -201,7 +551,6 @@ const AlertsScreen = () => {
         <View style={styles.content}>
           {filteredAlerts.length > 0 ? (
             <>
-              {/* Today's Alerts */}
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Recent</Text>
                 {alerts.length > 0 && (
@@ -231,9 +580,11 @@ const AlertsScreen = () => {
               </View>
               <Text style={styles.emptyTitle}>No Alerts</Text>
               <Text style={styles.emptyMessage}>
-                {activeFilter === "all"
-                  ? "You're all caught up! No alerts to display."
-                  : `No ${activeFilter} alerts at this time.`}
+                {isLoading
+                  ? "Loading cry alerts..."
+                  : activeFilter === "all"
+                    ? "You're all caught up! No alerts to display."
+                    : `No ${activeFilter} alerts at this time.`}
               </Text>
             </View>
           )}
@@ -250,6 +601,22 @@ const styles = StyleSheet.create({
   },
   headerButton: {
     padding: LAYOUT.spacing.xs,
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FFEBEE",
+    marginHorizontal: LAYOUT.spacing.md,
+    marginTop: LAYOUT.spacing.sm,
+    marginBottom: LAYOUT.spacing.sm,
+    padding: LAYOUT.spacing.sm,
+    borderRadius: LAYOUT.borderRadius.sm,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 12,
+    color: COLORS.error,
   },
   summaryCard: {
     flexDirection: "row",
