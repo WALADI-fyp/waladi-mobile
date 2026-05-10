@@ -11,6 +11,13 @@ export interface Alert {
   status: AlertStatus;
   timestamp: Date;
   icon: string;
+  deviceId?: string;
+  alertId?: string;
+  startedAt?: Date;
+  endedAt?: Date | null;
+  isActive?: boolean;
+  startProb?: number;
+  endProb?: number;
 }
 
 export interface AlertsData {
