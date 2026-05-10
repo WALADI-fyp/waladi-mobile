@@ -72,10 +72,13 @@ function parseStatus(value: unknown, isActive: boolean): AlertStatus {
 
 function formatDateTime(date: Date): string {
   return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "numeric",
     minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
   });
 }
 
@@ -84,9 +87,30 @@ function formatProb(prob?: number): string | null {
   return `${Math.round(prob * 100)}%`;
 }
 
+function formatDurationSeconds(seconds: number): string {
+  return `${seconds.toFixed(3)}s`;
+}
+
+function resolveDurationSeconds(
+  startedAt: Date,
+  endedAt: Date | null,
+  durationSeconds?: number,
+): number {
+  if (durationSeconds !== undefined && Number.isFinite(durationSeconds)) {
+    return Math.max(0, durationSeconds);
+  }
+
+  if (!endedAt) {
+    return Math.max(0, (Date.now() - startedAt.getTime()) / 1000);
+  }
+
+  return Math.max(0, (endedAt.getTime() - startedAt.getTime()) / 1000);
+}
+
 function buildCryMessage(
   startedAt: Date,
   endedAt: Date | null,
+  durationSeconds?: number,
   startProb?: number,
   endProb?: number,
 ): string {
@@ -97,6 +121,12 @@ function buildCryMessage(
   if (startLabel) {
     parts.push(`Start confidence: ${startLabel}.`);
   }
+
+  const resolvedDuration = resolveDurationSeconds(
+    startedAt,
+    endedAt,
+    durationSeconds,
+  );
 
   if (!endedAt) {
     parts.push("Still crying...");
@@ -172,11 +202,28 @@ function mapCryAlertRowToAlert(raw: unknown): AlertType | null {
     parseNumberValue(row.end_prob) ??
     parseNumberValue(row.endProb) ??
     parseNumberValue(row.probability_end);
+  const durationSeconds =
+    parseNumberValue(row.duration_s) ??
+    parseNumberValue(row.duration_sec) ??
+    parseNumberValue(row.duration_seconds);
+  const resolvedDuration = resolveDurationSeconds(
+    startedAt,
+    endedAt,
+    durationSeconds,
+  );
 
   return {
     id,
-    title: isActive ? "Crying in progress" : "Crying detected",
-    message: buildCryMessage(startedAt, endedAt, startProb, endProb),
+    title: isActive
+      ? "Crying in progress"
+      : `Crying detected (${formatDurationSeconds(resolvedDuration)})`,
+    message: buildCryMessage(
+      startedAt,
+      endedAt,
+      durationSeconds,
+      startProb,
+      endProb,
+    ),
     severity: parseSeverity(row.severity, isActive),
     category: "sound",
     status: parseStatus(row.status, isActive),
@@ -207,14 +254,14 @@ function applyLiveCryPayload(
       (a) =>
         a.id === id ||
         (!!eventAlertId && a.alertId === eventAlertId) ||
-        (!eventAlertId && a.isActive && a.deviceId === eventDeviceId),
+        (a.isActive && a.deviceId === eventDeviceId),
     );
 
     if (index === -1) {
       const newAlert: AlertType = {
         id,
         title: "Crying in progress",
-        message: buildCryMessage(eventTime, null, prob),
+        message: buildCryMessage(eventTime, null, undefined, prob),
         severity: "critical",
         category: "sound",
         status: "unread",
@@ -232,11 +279,17 @@ function applyLiveCryPayload(
 
     const existing = current[index];
     const startedAt = existing.startedAt ?? existing.timestamp ?? eventTime;
+    const resolvedId = eventAlertId ?? existing.id;
     const updated: AlertType = {
       ...existing,
-      id,
+      id: resolvedId,
       title: "Crying in progress",
-      message: buildCryMessage(startedAt, null, existing.startProb ?? prob),
+      message: buildCryMessage(
+        startedAt,
+        null,
+        undefined,
+        existing.startProb ?? prob,
+      ),
       severity: "critical",
       status: "unread",
       deviceId: eventDeviceId,
@@ -253,38 +306,43 @@ function applyLiveCryPayload(
   }
 
   // cry_end
-  const index = current.findIndex(
-    (a) =>
-      (!!eventAlertId && (a.id === eventAlertId || a.alertId === eventAlertId)) ||
-      (a.isActive && a.deviceId === eventDeviceId),
-  );
-
+  let index = -1;
+  if (eventAlertId) {
+    index = current.findIndex(
+      (a) => a.id === eventAlertId || a.alertId === eventAlertId,
+    );
+  }
   if (index === -1) {
-    const orphanEndAlert: AlertType = {
-      id: eventAlertId ?? `end:${eventDeviceId}:${eventTime.getTime()}`,
-      title: "Crying ended",
-      message: `Ended at ${formatDateTime(eventTime)}.`,
-      severity: "info",
-      category: "sound",
-      status: "unread",
-      timestamp: eventTime,
-      icon: "volume-high-outline",
-      deviceId: eventDeviceId,
-      alertId: eventAlertId,
-      startedAt: eventTime,
-      endedAt: eventTime,
-      isActive: false,
-      endProb: prob,
-    };
-    return sortAndCap([orphanEndAlert, ...current]);
+    index = current.findIndex(
+      (a) => a.isActive && a.deviceId === eventDeviceId,
+    );
+  }
+  if (index === -1) {
+    // Ignore duplicate/noise end packets when we cannot map them to an active session.
+    return current;
   }
 
   const existing = current[index];
+  if (!existing.isActive) {
+    // We already ended this alert; ignore repeated end packets.
+    return current;
+  }
+
   const startedAt = existing.startedAt ?? existing.timestamp ?? eventTime;
+  const resolvedId = eventAlertId ?? existing.id;
   const updated: AlertType = {
     ...existing,
-    title: "Crying ended",
-    message: buildCryMessage(startedAt, eventTime, existing.startProb, prob),
+    id: resolvedId,
+    title: `Crying detected (${formatDurationSeconds(
+      resolveDurationSeconds(startedAt, eventTime),
+    )})`,
+    message: buildCryMessage(
+      startedAt,
+      eventTime,
+      undefined,
+      existing.startProb,
+      prob,
+    ),
     severity: "warning",
     status: "unread",
     alertId: eventAlertId ?? existing.alertId,
@@ -375,11 +433,6 @@ const AlertsScreen = () => {
     setAlerts((prev) =>
       prev.map((a) => (a.id === alert.id ? { ...a, status: "read" } : a)),
     );
-  };
-
-  const handleDismiss = (alert: AlertType) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
   };
 
   const handleMarkAllRead = () => {
@@ -565,7 +618,6 @@ const AlertsScreen = () => {
                   key={alert.id}
                   alert={alert}
                   onPress={handleAlertPress}
-                  onDismiss={handleDismiss}
                 />
               ))}
             </>

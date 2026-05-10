@@ -24,6 +24,7 @@
         "backgroundColor": "#ffffff"
       },
       "permissions": [
+        "POST_NOTIFICATIONS",
         "CAMERA",
         "RECORD_AUDIO",
         "READ_EXTERNAL_STORAGE",
@@ -52,7 +53,8 @@
         {
           "microphonePermission": "Allow WALADI to access your microphone."
         }
-      ]
+      ],
+      "expo-notifications"
     ]
   }
 }
