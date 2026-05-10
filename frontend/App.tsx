@@ -25,14 +25,20 @@ const tokenCache = {
 };
 
 export default function App() {
+  return (
+    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+      <AppContent />
+    </ClerkProvider>
+  );
+}
+
+function AppContent() {
   useAiPoseLogging();
   useCryAlertNotifications();
 
   return (
-    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
-      <SafeAreaProvider>
-        <AppNavigator />
-      </SafeAreaProvider>
-    </ClerkProvider>
+    <SafeAreaProvider>
+      <AppNavigator />
+    </SafeAreaProvider>
   );
 }
