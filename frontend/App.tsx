@@ -3,6 +3,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ClerkProvider } from '@clerk/clerk-expo';
 import * as SecureStore from 'expo-secure-store';
 import AppNavigator from './src/navigation/AppNavigator';
+import { useAiPoseLogging } from './src/hooks/useAiPoseLogging';
+import { useCryAlertNotifications } from './src/hooks/useCryAlertNotifications';
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 
@@ -23,6 +25,9 @@ const tokenCache = {
 };
 
 export default function App() {
+  useAiPoseLogging();
+  useCryAlertNotifications();
+
   return (
     <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
       <SafeAreaProvider>

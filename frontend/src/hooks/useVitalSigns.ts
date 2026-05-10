@@ -6,9 +6,6 @@ import { VitalSign } from "../types/monitor.types";
 /** How long (ms) without a message before we consider the stream stale. */
 const STALE_THRESHOLD_MS = 3000;
 
-/** Minimum interval (ms) between UI state updates to avoid overwhelming React. */
-const UI_UPDATE_INTERVAL_MS = 2000;
-
 /** Simple threshold logic to derive a status from a value. */
 function deriveStatus(
   field: string,
@@ -138,12 +135,9 @@ export function useVitalSigns(): UseVitalSignsResult {
 
   const lastTsRef = useRef<number>(0);
   const staleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastLogRef = useRef<number>(0);
-  const latestPayloadRef = useRef<SensorPayload | null>(null);
 
   const handleData = useCallback((payload: SensorPayload) => {
     lastTsRef.current = Date.now();
-    latestPayloadRef.current = payload;
     setIsConnected(true);
     setIsStale(false);
     setError(null);
@@ -162,16 +156,6 @@ export function useVitalSigns(): UseVitalSignsResult {
       if (lastTsRef.current > 0) {
         const age = Date.now() - lastTsRef.current;
         setIsStale(age > STALE_THRESHOLD_MS);
-      }
-
-      // Console log sensor data every 10 seconds
-      const now = Date.now();
-      if (latestPayloadRef.current && now - lastLogRef.current >= 10_000) {
-        lastLogRef.current = now;
-        console.log(
-          "[WALDI Sensor Data]",
-          JSON.stringify(latestPayloadRef.current, null, 2),
-        );
       }
     }, 1000);
 
