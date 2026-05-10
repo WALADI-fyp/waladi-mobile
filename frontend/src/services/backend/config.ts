@@ -24,3 +24,4 @@ export const DEVICES_URL = `${BACKEND_URL}/api/devices`;
 export const SENSOR_DATA_URL = `${BACKEND_URL}/api/sensor-data`;
 export const ANALYTICS_URL = `${BACKEND_URL}/api/analytics`;
 export const CRY_ALERTS_URL = `${BACKEND_URL}/api/alerts/cry`;
+export const EXPO_PUSH_TOKEN_URL = `${BACKEND_URL}/api/notifications/expo-token`;

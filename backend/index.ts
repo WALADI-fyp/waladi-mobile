@@ -7,8 +7,13 @@
  */
 
 import { startServer } from "./server";
+import { startCryPushNotifications } from "./cryPushNotifications";
 
 startServer().catch((err) => {
   console.error("[startup] Failed to start backend:", err);
   process.exit(1);
+});
+
+startCryPushNotifications().catch((err) => {
+  console.error("[startup] Failed to start cry push notifier:", err);
 });

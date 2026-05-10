@@ -18,6 +18,33 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+function isExpoPushToken(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    (value.startsWith("ExponentPushToken[") ||
+      value.startsWith("ExpoPushToken["))
+  );
+}
+
+async function ensurePushTokenTable(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_push_tokens (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expo_push_token TEXT NOT NULL UNIQUE,
+      platform TEXT,
+      device_id TEXT,
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_id
+     ON user_push_tokens(user_id)`,
+  );
+}
+
 // Clerk middleware — parses auth on all requests (non-blocking)
 app.use(clerkMiddleware());
 
@@ -167,6 +194,37 @@ app.get("/api/alerts/cry", requireAuth(), async (req: any, res) => {
   }
 });
 
+// ── POST /api/notifications/expo-token (auth required) ──
+// Registers or updates the authenticated user's Expo push token.
+app.post("/api/notifications/expo-token", requireAuth(), async (req: any, res) => {
+  const { userId } = getAuth(req);
+  const { expo_push_token, platform, device_id } = req.body ?? {};
+
+  if (!isExpoPushToken(expo_push_token)) {
+    return res.status(400).json({ error: "Valid expo_push_token is required" });
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO user_push_tokens (user_id, expo_push_token, platform, device_id, enabled)
+       VALUES ($1, $2, $3, $4, true)
+       ON CONFLICT (expo_push_token)
+       DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         platform = COALESCE(EXCLUDED.platform, user_push_tokens.platform),
+         device_id = COALESCE(EXCLUDED.device_id, user_push_tokens.device_id),
+         enabled = true,
+         updated_at = NOW()`,
+      [userId, expo_push_token, platform ?? null, device_id ?? null],
+    );
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[server] /api/notifications/expo-token error:", err);
+    return res.status(500).json({ error: "Failed to register push token" });
+  }
+});
+
 // ── GET /api/analytics (auth required) ──
 // Returns time-bucketed averages for all vitals.
 //
@@ -226,6 +284,7 @@ app.get("/api/analytics", requireAuth(), async (req: any, res) => {
 
 export async function startServer(): Promise<void> {
   await verifyDatabaseConnection();
+  await ensurePushTokenTable();
 
   app.listen(PORT, () => {
     console.log(`[server] Listening on http://0.0.0.0:${PORT}`);
@@ -234,6 +293,7 @@ export async function startServer(): Promise<void> {
     console.log(`[server]   GET  /api/devices`);
     console.log(`[server]   GET  /api/sensor-data`);
     console.log(`[server]   GET  /api/alerts/cry`);
+    console.log(`[server]   POST /api/notifications/expo-token`);
     console.log(`[server]   GET  /api/analytics?range=24h|7d|30d`);
   });
 }
