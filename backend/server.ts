@@ -329,6 +329,31 @@ app.get("/api/alerts/risky-posture", requireAuth(), async (req: any, res) => {
   }
 });
 
+// ── GET /api/alerts/temperature (auth required) ──
+// Returns latest temperature alerts for the authenticated user.
+app.get("/api/alerts/temperature", requireAuth(), async (req: any, res) => {
+  const { userId } = getAuth(req);
+  const limit = Math.min(
+    parseInt((req.query.limit as string) || "50", 10),
+    200,
+  );
+
+  try {
+    const result = await pool.query(
+      `SELECT *
+       FROM temperature_alerts
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [userId, limit],
+    );
+    return res.json(result.rows);
+  } catch (err) {
+    console.error("[server] /api/alerts/temperature error:", err);
+    return res.status(500).json({ error: "Failed to fetch temperature alerts" });
+  }
+});
+
 // ── POST /api/notifications/expo-token (auth required) ──
 // Registers or updates the authenticated user's Expo push token.
 app.post("/api/notifications/expo-token", requireAuth(), async (req: any, res) => {
@@ -456,6 +481,7 @@ export async function startServer(): Promise<void> {
     console.log(`[server]   GET  /api/alerts/cry`);
     console.log(`[server]   GET  /api/alerts/sleep`);
     console.log(`[server]   GET  /api/alerts/risky-posture`);
+    console.log(`[server]   GET  /api/alerts/temperature`);
     console.log(`[server]   POST /api/notifications/expo-token`);
     console.log(`[server]   GET  /api/analytics?weeks=8&device_id=<optional>`);
   });
