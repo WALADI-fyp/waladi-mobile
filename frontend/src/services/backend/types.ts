@@ -49,13 +49,29 @@ export interface AiPosePayload {
   source: "ai_pose_service" | string;
   data: {
     device_id: string;
-    nose_confidence: number;
+    nose_confidence?: number | null;
     is_risky: boolean;
-    baby_state: string;
-    ear: number;
-    blanket_flag: boolean;
-    burst_activated: boolean;
-    burst_false_alarm: boolean;
+    face_found?: boolean | null;
+    eyes_visible?: number | null;
+    baby_state?: string;
+    ear?: number | null;
+    blanket_flag?: boolean | null;
+    burst_activated?: boolean | null;
+    burst_false_alarm?: boolean | null;
+  };
+}
+
+export type SleepAlertEventType = "baby_fell_asleep" | "baby_woke_up";
+
+/** Payload published to waladi/ai/sleep topic */
+export interface SleepAlertPayload {
+  ts: number;
+  source: "sleep_detection_service" | string;
+  data: {
+    device_id: string;
+    baby_state: "awake" | "asleep" | string;
+    event: SleepAlertEventType;
+    ear?: number | null;
   };
 }
 

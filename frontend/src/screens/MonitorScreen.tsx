@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, SafeAreaView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS, LAYOUT } from "../constants";
@@ -10,9 +10,11 @@ import FullScreenVideoModal from "../components/monitor/FullScreenVideoModal";
 import AnimatedCard from "../components/common/AnimatedCard";
 import { useVitalSigns } from "../hooks/useVitalSigns";
 import * as Haptics from "expo-haptics";
+import { connectToAiPoseStream } from "../services/backend/aiPoseClient";
 
 const MonitorScreen = () => {
   const [isFullScreenVisible, setIsFullScreenVisible] = useState(false);
+  const [isRiskyPose, setIsRiskyPose] = useState(false);
   const { vitalSigns, isConnected, isStale, error } = useVitalSigns();
 
   const handleFullScreen = () => {
@@ -28,6 +30,26 @@ const MonitorScreen = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     console.log("Settings pressed");
   };
+
+  useEffect(() => {
+    const disconnect = connectToAiPoseStream(
+      (payload) => {
+        setIsRiskyPose(payload.data?.is_risky === true);
+      },
+      (err) => {
+        console.error("[MonitorScreen] ai pose stream error:", err.message);
+      },
+    );
+
+    return () => {
+      disconnect();
+    };
+  }, []);
+
+  const postureLabel = isRiskyPose
+    ? "Posture needs attention"
+    : "Posture looks safe";
+  const postureStatus = isRiskyPose ? "danger" : "safe";
 
   // Connection status display
   const getConnectionStatus = () => {
@@ -63,8 +85,8 @@ const MonitorScreen = () => {
           <AnimatedCard delay={0}>
             <LiveVideoPlayer
               isLive={DUMMY_MONITOR_DATA.isLive}
-              position={DUMMY_MONITOR_DATA.position}
-              positionStatus={DUMMY_MONITOR_DATA.positionStatus}
+              position={postureLabel}
+              positionStatus={postureStatus}
               onFullScreenPress={handleFullScreen}
             />
           </AnimatedCard>
@@ -131,7 +153,8 @@ const MonitorScreen = () => {
       <FullScreenVideoModal
         visible={isFullScreenVisible}
         isLive={DUMMY_MONITOR_DATA.isLive}
-        position={DUMMY_MONITOR_DATA.position}
+        isRisky={isRiskyPose}
+        position={postureLabel}
         onClose={handleCloseFullScreen}
       />
     </SafeAreaView>

@@ -5,12 +5,20 @@ const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const POLL_INTERVAL_MS = 5000;
 const LOOKBACK_WINDOW = "2 hours";
 
-const seenStartSessions = new Set<string>();
-const seenEndSessions = new Set<string>();
-const sessionStartMs = new Map<string, number>();
+const seenCryStartSessions = new Set<string>();
+const seenCryEndSessions = new Set<string>();
+const crySessionStartMs = new Map<string, number>();
+let cryBaselineInitialized = false;
+
+const seenSleepStartSessions = new Set<string>();
+const seenSleepEndSessions = new Set<string>();
+const sleepSessionStartMs = new Map<string, number>();
+let sleepBaselineInitialized = false;
+
+const seenRiskyPostureAlerts = new Set<string>();
+let riskyBaselineInitialized = false;
 
 let pollTimer: NodeJS.Timeout | null = null;
-let baselineInitialized = false;
 
 function parseString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -29,6 +37,10 @@ function parseNumber(value: unknown): number | null {
 
 function parseDate(value: unknown): Date | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
   if (typeof value !== "string" || value.length === 0) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
@@ -38,22 +50,44 @@ function formatDuration(seconds: number): string {
   return `${seconds.toFixed(3)}s`;
 }
 
+function formatSleepDuration(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 function formatProb(prob: number | null): string | null {
   if (prob === null) return null;
   return `${Math.round(prob * 100)}% confidence`;
 }
 
-function getSessionKey(row: Record<string, unknown>, startedAt: Date): string {
-  const alertId = parseString(row.alert_id) ?? parseString(row.alertId);
-  if (alertId) return `alert:${alertId}`;
-
-  const deviceId =
-    parseString(row.device_id) ?? parseString(row.deviceId) ?? "unknown-device";
-  return `device:${deviceId}:start:${startedAt.toISOString()}`;
-}
-
 function getDeviceId(row: Record<string, unknown>): string | null {
   return parseString(row.device_id) ?? parseString(row.deviceId);
+}
+
+function getSessionKey(
+  row: Record<string, unknown>,
+  startedAt: Date,
+  prefix: string,
+): string {
+  const alertId = parseString(row.alert_id) ?? parseString(row.alertId);
+  if (alertId) return `${prefix}:alert:${alertId}`;
+
+  const deviceId = getDeviceId(row) ?? "unknown-device";
+  return `${prefix}:device:${deviceId}:start:${startedAt.toISOString()}`;
+}
+
+function getRiskyKey(row: Record<string, unknown>, detectedAt: Date): string {
+  const alertId = parseString(row.alert_id) ?? parseString(row.alertId);
+  if (alertId) return `risk:alert:${alertId}`;
+
+  const deviceId = getDeviceId(row) ?? "unknown-device";
+  return `risk:device:${deviceId}:detected:${detectedAt.toISOString()}`;
 }
 
 function toJson(
@@ -152,10 +186,19 @@ async function resolveTokensForUsers(userIds: string[]): Promise<string[]> {
     );
 }
 
-async function pushCryStart(row: Record<string, unknown>, sessionKey: string) {
-  const userIds = await resolveUserIds(row);
+async function sendPushForUsers(
+  userIds: string[],
+  buildMessage: (to: string) => unknown,
+): Promise<void> {
   const tokens = await resolveTokensForUsers(userIds);
   if (tokens.length === 0) return;
+  const messages = tokens.map((to) => buildMessage(to));
+  await postExpoPush(messages);
+}
+
+async function pushCryStart(row: Record<string, unknown>, sessionKey: string) {
+  const userIds = await resolveUserIds(row);
+  if (userIds.length === 0) return;
 
   const prob = parseNumber(row.prob_start) ?? parseNumber(row.prob);
   const probText = formatProb(prob);
@@ -163,7 +206,7 @@ async function pushCryStart(row: Record<string, unknown>, sessionKey: string) {
     ? `Baby started crying (${probText}).`
     : "Baby started crying.";
 
-  const messages = tokens.map((to) => ({
+  await sendPushForUsers(userIds, (to) => ({
     to,
     sound: "default",
     title: "Crying detected",
@@ -175,8 +218,6 @@ async function pushCryStart(row: Record<string, unknown>, sessionKey: string) {
       device_id: getDeviceId(row),
     },
   }));
-
-  await postExpoPush(messages);
 }
 
 async function pushCryEnd(
@@ -186,8 +227,7 @@ async function pushCryEnd(
   endedAt: Date,
 ) {
   const userIds = await resolveUserIds(row);
-  const tokens = await resolveTokensForUsers(userIds);
-  if (tokens.length === 0) return;
+  if (userIds.length === 0) return;
 
   const dbDuration =
     parseNumber(row.duration_s) ??
@@ -204,7 +244,7 @@ async function pushCryEnd(
     ? `Baby stopped crying (${probText}).`
     : "Baby stopped crying.";
 
-  const messages = tokens.map((to) => ({
+  await sendPushForUsers(userIds, (to) => ({
     to,
     sound: "default",
     title,
@@ -217,8 +257,84 @@ async function pushCryEnd(
       duration_seconds: durationSeconds,
     },
   }));
+}
 
-  await postExpoPush(messages);
+async function pushSleepStart(row: Record<string, unknown>, sessionKey: string) {
+  const userIds = await resolveUserIds(row);
+  if (userIds.length === 0) return;
+
+  const ear =
+    parseNumber(row.ear_start) ??
+    parseNumber(row.start_ear) ??
+    parseNumber(row.ear);
+  const body = ear !== null ? `Baby fell asleep (EAR ${ear.toFixed(3)}).` : "Baby fell asleep.";
+
+  await sendPushForUsers(userIds, (to) => ({
+    to,
+    sound: "default",
+    title: "Sleep update",
+    body,
+    priority: "high",
+    data: {
+      type: "sleep_start",
+      session_key: sessionKey,
+      device_id: getDeviceId(row),
+    },
+  }));
+}
+
+async function pushSleepEnd(
+  row: Record<string, unknown>,
+  sessionKey: string,
+  startedAt: Date,
+  endedAt: Date,
+) {
+  const userIds = await resolveUserIds(row);
+  if (userIds.length === 0) return;
+
+  const dbDuration =
+    parseNumber(row.duration_s) ??
+    parseNumber(row.duration_sec) ??
+    parseNumber(row.duration_seconds);
+  const durationSeconds =
+    dbDuration !== null
+      ? Math.max(0, dbDuration)
+      : Math.max(0, (endedAt.getTime() - startedAt.getTime()) / 1000);
+
+  await sendPushForUsers(userIds, (to) => ({
+    to,
+    sound: "default",
+    title: "Sleep update",
+    body: `Baby woke up (slept ${formatSleepDuration(durationSeconds)}).`,
+    priority: "high",
+    data: {
+      type: "sleep_end",
+      session_key: sessionKey,
+      device_id: getDeviceId(row),
+      duration_seconds: durationSeconds,
+    },
+  }));
+}
+
+async function pushRiskyPostureAlert(
+  row: Record<string, unknown>,
+  alertKey: string,
+) {
+  const userIds = await resolveUserIds(row);
+  if (userIds.length === 0) return;
+
+  await sendPushForUsers(userIds, (to) => ({
+    to,
+    sound: "default",
+    title: "Risky posture detected",
+    body: "Risky posture detected. Please check your baby.",
+    priority: "high",
+    data: {
+      type: "risky_posture",
+      alert_key: alertKey,
+      device_id: getDeviceId(row),
+    },
+  }));
 }
 
 async function pollCryAlertsForPush(): Promise<void> {
@@ -232,7 +348,7 @@ async function pollCryAlertsForPush(): Promise<void> {
   );
 
   const rows = result.rows as Record<string, unknown>[];
-  if (!baselineInitialized) {
+  if (!cryBaselineInitialized) {
     for (const row of rows) {
       const startedAt =
         parseDate(row.started_at) ??
@@ -240,17 +356,17 @@ async function pollCryAlertsForPush(): Promise<void> {
         parseDate(row.created_at);
       if (!startedAt) continue;
 
-      const sessionKey = getSessionKey(row, startedAt);
-      seenStartSessions.add(sessionKey);
-      sessionStartMs.set(sessionKey, startedAt.getTime());
+      const sessionKey = getSessionKey(row, startedAt, "cry");
+      seenCryStartSessions.add(sessionKey);
+      crySessionStartMs.set(sessionKey, startedAt.getTime());
 
       const endedAt = parseDate(row.ended_at) ?? parseDate(row.endedAt);
       if (endedAt) {
-        seenEndSessions.add(sessionKey);
+        seenCryEndSessions.add(sessionKey);
       }
     }
 
-    baselineInitialized = true;
+    cryBaselineInitialized = true;
     console.log("[push] Cry push baseline initialized");
     return;
   }
@@ -262,12 +378,12 @@ async function pollCryAlertsForPush(): Promise<void> {
       parseDate(row.created_at);
     if (!startedAt) continue;
 
-    const sessionKey = getSessionKey(row, startedAt);
+    const sessionKey = getSessionKey(row, startedAt, "cry");
     const endedAt = parseDate(row.ended_at) ?? parseDate(row.endedAt);
 
-    if (!seenStartSessions.has(sessionKey)) {
-      seenStartSessions.add(sessionKey);
-      sessionStartMs.set(sessionKey, startedAt.getTime());
+    if (!seenCryStartSessions.has(sessionKey)) {
+      seenCryStartSessions.add(sessionKey);
+      crySessionStartMs.set(sessionKey, startedAt.getTime());
       try {
         await pushCryStart(row, sessionKey);
       } catch (err) {
@@ -275,9 +391,9 @@ async function pollCryAlertsForPush(): Promise<void> {
       }
     }
 
-    if (endedAt && !seenEndSessions.has(sessionKey)) {
-      seenEndSessions.add(sessionKey);
-      const startMs = sessionStartMs.get(sessionKey);
+    if (endedAt && !seenCryEndSessions.has(sessionKey)) {
+      seenCryEndSessions.add(sessionKey);
+      const startMs = crySessionStartMs.get(sessionKey);
       const resolvedStart = startMs ? new Date(startMs) : startedAt;
 
       try {
@@ -289,17 +405,138 @@ async function pollCryAlertsForPush(): Promise<void> {
   }
 }
 
+async function pollSleepAlertsForPush(): Promise<void> {
+  const result = await pool.query(
+    `SELECT *
+     FROM sleep_alerts
+     WHERE started_at >= NOW() - $1::interval
+     ORDER BY started_at ASC
+     LIMIT 500`,
+    [LOOKBACK_WINDOW],
+  );
+
+  const rows = result.rows as Record<string, unknown>[];
+  if (!sleepBaselineInitialized) {
+    for (const row of rows) {
+      const startedAt =
+        parseDate(row.started_at) ??
+        parseDate(row.startedAt) ??
+        parseDate(row.created_at);
+      if (!startedAt) continue;
+
+      const sessionKey = getSessionKey(row, startedAt, "sleep");
+      seenSleepStartSessions.add(sessionKey);
+      sleepSessionStartMs.set(sessionKey, startedAt.getTime());
+
+      const endedAt = parseDate(row.ended_at) ?? parseDate(row.endedAt);
+      if (endedAt) {
+        seenSleepEndSessions.add(sessionKey);
+      }
+    }
+
+    sleepBaselineInitialized = true;
+    console.log("[push] Sleep push baseline initialized");
+    return;
+  }
+
+  for (const row of rows) {
+    const startedAt =
+      parseDate(row.started_at) ??
+      parseDate(row.startedAt) ??
+      parseDate(row.created_at);
+    if (!startedAt) continue;
+
+    const sessionKey = getSessionKey(row, startedAt, "sleep");
+    const endedAt = parseDate(row.ended_at) ?? parseDate(row.endedAt);
+
+    if (!seenSleepStartSessions.has(sessionKey)) {
+      seenSleepStartSessions.add(sessionKey);
+      sleepSessionStartMs.set(sessionKey, startedAt.getTime());
+      try {
+        await pushSleepStart(row, sessionKey);
+      } catch (err) {
+        console.error("[push] Failed to send sleep start push:", err);
+      }
+    }
+
+    if (endedAt && !seenSleepEndSessions.has(sessionKey)) {
+      seenSleepEndSessions.add(sessionKey);
+      const startMs = sleepSessionStartMs.get(sessionKey);
+      const resolvedStart = startMs ? new Date(startMs) : startedAt;
+
+      try {
+        await pushSleepEnd(row, sessionKey, resolvedStart, endedAt);
+      } catch (err) {
+        console.error("[push] Failed to send sleep end push:", err);
+      }
+    }
+  }
+}
+
+async function pollRiskyPostureAlertsForPush(): Promise<void> {
+  const result = await pool.query(
+    `SELECT *
+     FROM risky_posture_alerts
+     WHERE detected_at >= NOW() - $1::interval
+     ORDER BY detected_at ASC
+     LIMIT 500`,
+    [LOOKBACK_WINDOW],
+  );
+
+  const rows = result.rows as Record<string, unknown>[];
+  if (!riskyBaselineInitialized) {
+    for (const row of rows) {
+      const detectedAt =
+        parseDate(row.detected_at) ??
+        parseDate(row.detectedAt) ??
+        parseDate(row.created_at);
+      if (!detectedAt) continue;
+
+      const alertKey = getRiskyKey(row, detectedAt);
+      seenRiskyPostureAlerts.add(alertKey);
+    }
+
+    riskyBaselineInitialized = true;
+    console.log("[push] Risky posture push baseline initialized");
+    return;
+  }
+
+  for (const row of rows) {
+    const detectedAt =
+      parseDate(row.detected_at) ??
+      parseDate(row.detectedAt) ??
+      parseDate(row.created_at);
+    if (!detectedAt) continue;
+
+    const alertKey = getRiskyKey(row, detectedAt);
+    if (seenRiskyPostureAlerts.has(alertKey)) continue;
+
+    seenRiskyPostureAlerts.add(alertKey);
+    try {
+      await pushRiskyPostureAlert(row, alertKey);
+    } catch (err) {
+      console.error("[push] Failed to send risky posture push:", err);
+    }
+  }
+}
+
+async function pollAllPushAlerts(): Promise<void> {
+  await pollCryAlertsForPush();
+  await pollSleepAlertsForPush();
+  await pollRiskyPostureAlertsForPush();
+}
+
 export async function startCryPushNotifications(): Promise<void> {
   if (pollTimer) return;
 
-  await pollCryAlertsForPush();
+  await pollAllPushAlerts();
   pollTimer = setInterval(() => {
-    pollCryAlertsForPush().catch((err) => {
-      console.error("[push] Cry push poll error:", err);
+    pollAllPushAlerts().catch((err) => {
+      console.error("[push] Alert push poll error:", err);
     });
   }, POLL_INTERVAL_MS);
 
-  console.log("[push] Cry push notifier started");
+  console.log("[push] Alert push notifier started (cry/sleep/risky posture)");
 }
 
 export function stopCryPushNotifications(): void {

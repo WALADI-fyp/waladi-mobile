@@ -45,6 +45,52 @@ async function ensurePushTokenTable(): Promise<void> {
   );
 }
 
+async function ensureDerivedAlertTables(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sleep_alerts (
+      id SERIAL PRIMARY KEY,
+      alert_id TEXT NOT NULL,
+      user_id TEXT,
+      device_id TEXT NOT NULL,
+      started_at TIMESTAMPTZ NOT NULL,
+      ended_at TIMESTAMPTZ,
+      duration_s DOUBLE PRECISION,
+      ear_start DOUBLE PRECISION,
+      ear_end DOUBLE PRECISION,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(alert_id, user_id)
+    )
+  `);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_sleep_alerts_user_started
+     ON sleep_alerts(user_id, started_at DESC)`,
+  );
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_sleep_alerts_device_active
+     ON sleep_alerts(device_id, ended_at)`,
+  );
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS risky_posture_alerts (
+      id SERIAL PRIMARY KEY,
+      alert_id TEXT NOT NULL,
+      user_id TEXT,
+      device_id TEXT NOT NULL,
+      detected_at TIMESTAMPTZ NOT NULL,
+      nose_confidence DOUBLE PRECISION,
+      face_found BOOLEAN,
+      eyes_visible INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(alert_id, user_id)
+    )
+  `);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_risky_posture_alerts_user_detected
+     ON risky_posture_alerts(user_id, detected_at DESC)`,
+  );
+}
+
 // Clerk middleware — parses auth on all requests (non-blocking)
 app.use(clerkMiddleware());
 
@@ -194,6 +240,58 @@ app.get("/api/alerts/cry", requireAuth(), async (req: any, res) => {
   }
 });
 
+// ── GET /api/alerts/sleep (auth required) ──
+// Returns latest sleep sessions for the authenticated user.
+app.get("/api/alerts/sleep", requireAuth(), async (req: any, res) => {
+  const { userId } = getAuth(req);
+  const limit = Math.min(
+    parseInt((req.query.limit as string) || "50", 10),
+    200,
+  );
+
+  try {
+    const result = await pool.query(
+      `SELECT *
+       FROM sleep_alerts
+       WHERE user_id = $1
+       ORDER BY started_at DESC
+       LIMIT $2`,
+      [userId, limit],
+    );
+    return res.json(result.rows);
+  } catch (err) {
+    console.error("[server] /api/alerts/sleep error:", err);
+    return res.status(500).json({ error: "Failed to fetch sleep alerts" });
+  }
+});
+
+// ── GET /api/alerts/risky-posture (auth required) ──
+// Returns latest risky posture alerts for the authenticated user.
+app.get("/api/alerts/risky-posture", requireAuth(), async (req: any, res) => {
+  const { userId } = getAuth(req);
+  const limit = Math.min(
+    parseInt((req.query.limit as string) || "50", 10),
+    200,
+  );
+
+  try {
+    const result = await pool.query(
+      `SELECT *
+       FROM risky_posture_alerts
+       WHERE user_id = $1
+       ORDER BY detected_at DESC
+       LIMIT $2`,
+      [userId, limit],
+    );
+    return res.json(result.rows);
+  } catch (err) {
+    console.error("[server] /api/alerts/risky-posture error:", err);
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch risky posture alerts" });
+  }
+});
+
 // ── POST /api/notifications/expo-token (auth required) ──
 // Registers or updates the authenticated user's Expo push token.
 app.post("/api/notifications/expo-token", requireAuth(), async (req: any, res) => {
@@ -285,6 +383,7 @@ app.get("/api/analytics", requireAuth(), async (req: any, res) => {
 export async function startServer(): Promise<void> {
   await verifyDatabaseConnection();
   await ensurePushTokenTable();
+  await ensureDerivedAlertTables();
 
   app.listen(PORT, () => {
     console.log(`[server] Listening on http://0.0.0.0:${PORT}`);
@@ -293,6 +392,8 @@ export async function startServer(): Promise<void> {
     console.log(`[server]   GET  /api/devices`);
     console.log(`[server]   GET  /api/sensor-data`);
     console.log(`[server]   GET  /api/alerts/cry`);
+    console.log(`[server]   GET  /api/alerts/sleep`);
+    console.log(`[server]   GET  /api/alerts/risky-posture`);
     console.log(`[server]   POST /api/notifications/expo-token`);
     console.log(`[server]   GET  /api/analytics?range=24h|7d|30d`);
   });
