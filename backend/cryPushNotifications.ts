@@ -18,12 +18,26 @@ let sleepBaselineInitialized = false;
 const seenRiskyPostureAlerts = new Set<string>();
 let riskyBaselineInitialized = false;
 
+const seenTemperatureAlerts = new Set<string>();
+let temperatureBaselineInitialized = false;
+
 let pollTimer: NodeJS.Timeout | null = null;
 
 function parseString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const v = value.trim();
   return v.length > 0 ? v : null;
+}
+
+function parseIdentifier(value: unknown): string | null {
+  const asString = parseString(value);
+  if (asString) return asString;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return null;
 }
 
 function parseNumber(value: unknown): number | null {
@@ -88,6 +102,51 @@ function getRiskyKey(row: Record<string, unknown>, detectedAt: Date): string {
 
   const deviceId = getDeviceId(row) ?? "unknown-device";
   return `risk:device:${deviceId}:detected:${detectedAt.toISOString()}`;
+}
+
+type TemperatureSeverity =
+  | "normal_high"
+  | "moderately_high"
+  | "severe";
+
+function classifyTemperatureSeverity(
+  temperatureC: number,
+): TemperatureSeverity | null {
+  if (temperatureC <= 37.0) return null;
+  if (temperatureC <= 37.5) return "normal_high";
+  if (temperatureC <= 38.0) return "moderately_high";
+  return "severe";
+}
+
+function parseTemperatureSeverity(
+  severityRaw: unknown,
+  temperatureC: number | null,
+): TemperatureSeverity | null {
+  if (
+    severityRaw === "normal_high" ||
+    severityRaw === "moderately_high" ||
+    severityRaw === "severe"
+  ) {
+    return severityRaw;
+  }
+
+  if (temperatureC === null) return null;
+  return classifyTemperatureSeverity(temperatureC);
+}
+
+function getTemperatureAlertKey(
+  row: Record<string, unknown>,
+  createdAt: Date,
+): string {
+  const alertId = parseIdentifier(row.alert_id) ?? parseIdentifier(row.alertId);
+  if (alertId) return `temp:alert:${alertId}`;
+
+  const rowId = parseIdentifier(row.id);
+  if (rowId) return `temp:id:${rowId}`;
+
+  const deviceId = getDeviceId(row) ?? "unknown-device";
+  const temperature = parseNumber(row.temperature_c) ?? parseNumber(row.temperatureC) ?? -999;
+  return `temp:device:${deviceId}:created:${createdAt.toISOString()}:value:${temperature.toFixed(3)}`;
 }
 
 function toJson(
@@ -333,6 +392,49 @@ async function pushRiskyPostureAlert(
   }));
 }
 
+async function pushTemperatureAlert(
+  row: Record<string, unknown>,
+  alertKey: string,
+) {
+  const userIds = await resolveUserIds(row);
+  if (userIds.length === 0) return;
+
+  const temperatureC = parseNumber(row.temperature_c) ?? parseNumber(row.temperatureC);
+  const severity = parseTemperatureSeverity(row.severity, temperatureC);
+  if (severity === null || temperatureC === null) return;
+
+  let title = "Temperature alert";
+  let body = `Body temperature is ${temperatureC.toFixed(1)}°C.`;
+  let priority: "default" | "high" = "high";
+
+  if (severity === "normal_high") {
+    title = "Temperature slightly high";
+    body = `Body temperature is ${temperatureC.toFixed(1)}°C. Monitor closely.`;
+    priority = "default";
+  } else if (severity === "moderately_high") {
+    title = "Temperature moderately high";
+    body = `Body temperature is ${temperatureC.toFixed(1)}°C. Please check on your baby.`;
+  } else if (severity === "severe") {
+    title = "Severe temperature alert";
+    body = `Body temperature is ${temperatureC.toFixed(1)}°C. Please check immediately.`;
+  }
+
+  await sendPushForUsers(userIds, (to) => ({
+    to,
+    sound: "default",
+    title,
+    body,
+    priority,
+    data: {
+      type: "temperature_alert",
+      alert_key: alertKey,
+      device_id: getDeviceId(row),
+      temperature_c: temperatureC,
+      severity,
+    },
+  }));
+}
+
 async function pollCryAlertsForPush(): Promise<void> {
   const result = await pool.query(
     `SELECT *
@@ -516,10 +618,68 @@ async function pollRiskyPostureAlertsForPush(): Promise<void> {
   }
 }
 
+async function pollTemperatureAlertsForPush(): Promise<void> {
+  const result = await pool.query(
+    `SELECT *
+     FROM temperature_alerts
+     WHERE created_at >= NOW() - $1::interval
+     ORDER BY created_at ASC
+     LIMIT 500`,
+    [LOOKBACK_WINDOW],
+  );
+
+  const rows = result.rows as Record<string, unknown>[];
+  if (!temperatureBaselineInitialized) {
+    for (const row of rows) {
+      const createdAt =
+        parseDate(row.created_at) ??
+        parseDate(row.createdAt) ??
+        parseDate(row.ts);
+      if (!createdAt) continue;
+
+      const temperatureC =
+        parseNumber(row.temperature_c) ?? parseNumber(row.temperatureC);
+      const severity = parseTemperatureSeverity(row.severity, temperatureC);
+      if (!severity || temperatureC === null) continue;
+
+      const alertKey = getTemperatureAlertKey(row, createdAt);
+      seenTemperatureAlerts.add(alertKey);
+    }
+
+    temperatureBaselineInitialized = true;
+    console.log("[push] Temperature push baseline initialized");
+    return;
+  }
+
+  for (const row of rows) {
+    const createdAt =
+      parseDate(row.created_at) ??
+      parseDate(row.createdAt) ??
+      parseDate(row.ts);
+    if (!createdAt) continue;
+
+    const temperatureC =
+      parseNumber(row.temperature_c) ?? parseNumber(row.temperatureC);
+    const severity = parseTemperatureSeverity(row.severity, temperatureC);
+    if (!severity || temperatureC === null) continue;
+
+    const alertKey = getTemperatureAlertKey(row, createdAt);
+    if (seenTemperatureAlerts.has(alertKey)) continue;
+
+    seenTemperatureAlerts.add(alertKey);
+    try {
+      await pushTemperatureAlert(row, alertKey);
+    } catch (err) {
+      console.error("[push] Failed to send temperature push:", err);
+    }
+  }
+}
+
 async function pollAllPushAlerts(): Promise<void> {
   await pollCryAlertsForPush();
   await pollSleepAlertsForPush();
   await pollRiskyPostureAlertsForPush();
+  await pollTemperatureAlertsForPush();
 }
 
 export async function startCryPushNotifications(): Promise<void> {
@@ -532,7 +692,9 @@ export async function startCryPushNotifications(): Promise<void> {
     });
   }, POLL_INTERVAL_MS);
 
-  console.log("[push] Alert push notifier started (cry/sleep/risky posture)");
+  console.log(
+    "[push] Alert push notifier started (cry/sleep/risky posture/temperature)",
+  );
 }
 
 export function stopCryPushNotifications(): void {

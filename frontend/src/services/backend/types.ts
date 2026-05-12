@@ -85,3 +85,19 @@ export interface CryAlertPayload {
   alert_id?: string;
   ts?: number;
 }
+
+export type TemperatureAlertSeverity =
+  | "normal_high"
+  | "moderately_high"
+  | "severe";
+
+export interface TemperatureAlertPayload {
+  event: "temperature_alert" | string;
+  user_id?: string;
+  device_id?: string;
+  temperature_c?: number | string | null;
+  severity?: TemperatureAlertSeverity | string;
+  created_at?: string;
+  alert_id?: string;
+  ts?: number;
+}
