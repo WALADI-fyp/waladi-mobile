@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -20,17 +20,32 @@ import {
   AlertSeverity,
   AlertStatus,
 } from "../types/alert.types";
-import { CRY_ALERTS_URL } from "../services/backend/config";
+import {
+  CRY_ALERTS_URL,
+  SLEEP_ALERTS_URL,
+  RISKY_POSTURE_ALERTS_URL,
+} from "../services/backend/config";
 import { connectToCryAlertStream } from "../services/backend/cryAlertClient";
-import { CryAlertPayload } from "../services/backend/types";
+import { connectToSleepAlertStream } from "../services/backend/sleepAlertClient";
+import { connectToAiPoseStream } from "../services/backend/aiPoseClient";
+import {
+  AiPosePayload,
+  CryAlertPayload,
+  SleepAlertPayload,
+} from "../services/backend/types";
 
 type FilterType = "all" | "critical" | "warning" | "info";
 
 const MAX_ALERTS = 50;
+const RISKY_ALERT_MIN_GAP_MS = 60_000;
 
 function parseDateValue(value: unknown): Date | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
   if (typeof value !== "string" || value.length === 0) {
     return null;
@@ -46,6 +61,16 @@ function parseNumberValue(value: unknown): number | undefined {
   if (typeof value === "string" && value.length > 0) {
     const n = Number(value);
     if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function parseBooleanValue(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    if (v === "true") return true;
+    if (v === "false") return false;
   }
   return undefined;
 }
@@ -72,10 +97,13 @@ function parseStatus(value: unknown, isActive: boolean): AlertStatus {
 
 function formatDateTime(date: Date): string {
   return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "numeric",
     minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
   });
 }
 
@@ -84,9 +112,41 @@ function formatProb(prob?: number): string | null {
   return `${Math.round(prob * 100)}%`;
 }
 
+function formatDurationSeconds(seconds: number): string {
+  return `${seconds.toFixed(3)}s`;
+}
+
+function formatDurationCompact(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function resolveDurationSeconds(
+  startedAt: Date,
+  endedAt: Date | null,
+  durationSeconds?: number,
+): number {
+  if (durationSeconds !== undefined && Number.isFinite(durationSeconds)) {
+    return Math.max(0, durationSeconds);
+  }
+
+  if (!endedAt) {
+    return Math.max(0, (Date.now() - startedAt.getTime()) / 1000);
+  }
+
+  return Math.max(0, (endedAt.getTime() - startedAt.getTime()) / 1000);
+}
+
 function buildCryMessage(
   startedAt: Date,
   endedAt: Date | null,
+  durationSeconds?: number,
   startProb?: number,
   endProb?: number,
 ): string {
@@ -97,6 +157,12 @@ function buildCryMessage(
   if (startLabel) {
     parts.push(`Start confidence: ${startLabel}.`);
   }
+
+  const resolvedDuration = resolveDurationSeconds(
+    startedAt,
+    endedAt,
+    durationSeconds,
+  );
 
   if (!endedAt) {
     parts.push("Still crying...");
@@ -112,29 +178,87 @@ function buildCryMessage(
   return parts.join(" ");
 }
 
+function buildSleepMessage(
+  startedAt: Date,
+  endedAt: Date | null,
+  durationSeconds?: number,
+  _startEar?: number,
+  _endEar?: number,
+): string {
+  const parts: string[] = [];
+  parts.push(`Started at ${formatDateTime(startedAt)}.`);
+
+  if (!endedAt) {
+    parts.push("Still currently sleeping.");
+    return parts.join(" ");
+  }
+
+  parts.push(`Woke up at ${formatDateTime(endedAt)}.`);
+
+  const resolved = resolveDurationSeconds(startedAt, endedAt, durationSeconds);
+  parts.push(`Slept for ${formatDurationCompact(resolved)}.`);
+
+  return parts.join(" ");
+}
+
 function sortAndCap(alerts: AlertType[]): AlertType[] {
   return [...alerts]
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
     .slice(0, MAX_ALERTS);
 }
 
+function isCloseTime(a: Date | undefined, b: Date | undefined, ms: number): boolean {
+  if (!a || !b) return false;
+  return Math.abs(a.getTime() - b.getTime()) <= ms;
+}
+
+function isSameAlertSemantic(fetched: AlertType, live: AlertType): boolean {
+  if (fetched.id === live.id) return true;
+
+  if (fetched.alertId && live.alertId && fetched.alertId === live.alertId) {
+    return true;
+  }
+
+  if (fetched.category !== live.category) return false;
+  if (!fetched.deviceId || !live.deviceId) return false;
+  if (fetched.deviceId !== live.deviceId) return false;
+
+  if (fetched.category === "sleep") {
+    const fetchedStart = fetched.startedAt ?? fetched.timestamp;
+    const liveStart = live.startedAt ?? live.timestamp;
+    return isCloseTime(fetchedStart, liveStart, 15_000);
+  }
+
+  if (fetched.category === "movement") {
+    return isCloseTime(fetched.timestamp, live.timestamp, 10_000);
+  }
+
+  if (fetched.category === "sound") {
+    const fetchedStart = fetched.startedAt ?? fetched.timestamp;
+    const liveStart = live.startedAt ?? live.timestamp;
+    return isCloseTime(fetchedStart, liveStart, 8_000);
+  }
+
+  return false;
+}
+
 function mergeFetchedWithActiveLive(
   fetched: AlertType[],
   current: AlertType[],
 ): AlertType[] {
-  const byId = new Map<string, AlertType>();
+  const merged = [...fetched];
 
-  for (const alert of fetched) {
-    byId.set(alert.id, alert);
-  }
+  for (const liveAlert of current) {
+    const alreadyPresent = merged.some((fetchedAlert) =>
+      isSameAlertSemantic(fetchedAlert, liveAlert),
+    );
 
-  for (const alert of current) {
-    if (!byId.has(alert.id)) {
-      byId.set(alert.id, alert);
+    if (!alreadyPresent) {
+      merged.push(liveAlert);
     }
   }
 
-  return sortAndCap(Array.from(byId.values()));
+  return sortAndCap(merged);
 }
 
 function mapCryAlertRowToAlert(raw: unknown): AlertType | null {
@@ -172,11 +296,28 @@ function mapCryAlertRowToAlert(raw: unknown): AlertType | null {
     parseNumberValue(row.end_prob) ??
     parseNumberValue(row.endProb) ??
     parseNumberValue(row.probability_end);
+  const durationSeconds =
+    parseNumberValue(row.duration_s) ??
+    parseNumberValue(row.duration_sec) ??
+    parseNumberValue(row.duration_seconds);
+  const resolvedDuration = resolveDurationSeconds(
+    startedAt,
+    endedAt,
+    durationSeconds,
+  );
 
   return {
     id,
-    title: isActive ? "Crying in progress" : "Crying detected",
-    message: buildCryMessage(startedAt, endedAt, startProb, endProb),
+    title: isActive
+      ? "Crying in progress"
+      : `Crying detected (${formatDurationSeconds(resolvedDuration)})`,
+    message: buildCryMessage(
+      startedAt,
+      endedAt,
+      durationSeconds,
+      startProb,
+      endProb,
+    ),
     severity: parseSeverity(row.severity, isActive),
     category: "sound",
     status: parseStatus(row.status, isActive),
@@ -189,6 +330,144 @@ function mapCryAlertRowToAlert(raw: unknown): AlertType | null {
     isActive,
     startProb,
     endProb,
+  };
+}
+
+function mapSleepAlertRowToAlert(raw: unknown): AlertType | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const row = raw as Record<string, unknown>;
+  const startedAt =
+    parseDateValue(row.started_at) ??
+    parseDateValue(row.startedAt) ??
+    parseDateValue(row.created_at) ??
+    new Date();
+  const endedAt = parseDateValue(row.ended_at) ?? parseDateValue(row.endedAt);
+  const isActive = endedAt === null;
+
+  const alertId =
+    parseStringValue(row.alert_id) ??
+    parseStringValue(row.alertId) ??
+    parseStringValue(row.id);
+  const deviceId =
+    parseStringValue(row.device_id) ??
+    parseStringValue(row.deviceId) ??
+    "unknown-device";
+  const id = `sleep:${alertId ?? `${deviceId}:${startedAt.toISOString()}`}`;
+
+  const durationSeconds =
+    parseNumberValue(row.duration_s) ??
+    parseNumberValue(row.duration_sec) ??
+    parseNumberValue(row.duration_seconds);
+  const startEar =
+    parseNumberValue(row.ear_start) ??
+    parseNumberValue(row.start_ear) ??
+    parseNumberValue(row.ear);
+  const endEar =
+    parseNumberValue(row.ear_end) ??
+    parseNumberValue(row.end_ear) ??
+    parseNumberValue(row.ear_wake);
+  const resolvedDuration = resolveDurationSeconds(
+    startedAt,
+    endedAt,
+    durationSeconds,
+  );
+
+  const rawSeverity = row.severity;
+  const severity: AlertSeverity =
+    rawSeverity === "critical" || rawSeverity === "warning" || rawSeverity === "info"
+      ? rawSeverity
+      : "info";
+
+  return {
+    id,
+    title: isActive
+      ? "Sleeping in progress"
+      : `Baby woke up (${formatDurationCompact(resolvedDuration)})`,
+    message: buildSleepMessage(
+      startedAt,
+      endedAt,
+      durationSeconds,
+      startEar,
+      endEar,
+    ),
+    severity,
+    category: "sleep",
+    status: parseStatus(row.status, isActive),
+    timestamp: startedAt,
+    icon: "moon-outline",
+    deviceId,
+    alertId,
+    startedAt,
+    endedAt,
+    isActive,
+  };
+}
+
+function mapRiskyPostureRowToAlert(raw: unknown): AlertType | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const row = raw as Record<string, unknown>;
+  const detectedAt =
+    parseDateValue(row.detected_at) ??
+    parseDateValue(row.detectedAt) ??
+    parseDateValue(row.ts) ??
+    parseDateValue(row.created_at) ??
+    new Date();
+
+  const alertId =
+    parseStringValue(row.alert_id) ??
+    parseStringValue(row.alertId) ??
+    parseStringValue(row.id);
+  const deviceId =
+    parseStringValue(row.device_id) ??
+    parseStringValue(row.deviceId) ??
+    "unknown-device";
+  const id = `risk:${alertId ?? `${deviceId}:${detectedAt.toISOString()}`}`;
+
+  const noseConfidence =
+    parseNumberValue(row.nose_confidence) ??
+    parseNumberValue(row.noseConfidence);
+  const faceFound =
+    parseBooleanValue(row.face_found) ?? parseBooleanValue(row.faceFound);
+  const eyesVisible =
+    parseNumberValue(row.eyes_visible) ?? parseNumberValue(row.eyesVisible);
+
+  const details: string[] = [`Detected at ${formatDateTime(detectedAt)}.`];
+  if (noseConfidence !== undefined) {
+    details.push(`Nose confidence: ${Math.round(noseConfidence * 100)}%.`);
+  }
+  if (faceFound !== undefined) {
+    details.push(faceFound ? "Face found." : "Face not found.");
+  }
+  if (eyesVisible !== undefined) {
+    details.push(`Eyes visible: ${Math.round(eyesVisible)}.`);
+  }
+
+  const rawSeverity = row.severity;
+  const severity: AlertSeverity =
+    rawSeverity === "critical" || rawSeverity === "warning" || rawSeverity === "info"
+      ? rawSeverity
+      : "critical";
+
+  return {
+    id,
+    title: "Risky posture detected",
+    message: details.join(" "),
+    severity,
+    category: "movement",
+    status: parseStatus(row.status, true),
+    timestamp: detectedAt,
+    icon: "body-outline",
+    deviceId,
+    alertId,
+    startedAt: detectedAt,
+    endedAt: detectedAt,
+    isActive: false,
   };
 }
 
@@ -207,14 +486,14 @@ function applyLiveCryPayload(
       (a) =>
         a.id === id ||
         (!!eventAlertId && a.alertId === eventAlertId) ||
-        (!eventAlertId && a.isActive && a.deviceId === eventDeviceId),
+        (a.isActive && a.deviceId === eventDeviceId),
     );
 
     if (index === -1) {
       const newAlert: AlertType = {
         id,
         title: "Crying in progress",
-        message: buildCryMessage(eventTime, null, prob),
+        message: buildCryMessage(eventTime, null, undefined, prob),
         severity: "critical",
         category: "sound",
         status: "unread",
@@ -232,11 +511,17 @@ function applyLiveCryPayload(
 
     const existing = current[index];
     const startedAt = existing.startedAt ?? existing.timestamp ?? eventTime;
+    const resolvedId = eventAlertId ?? existing.id;
     const updated: AlertType = {
       ...existing,
-      id,
+      id: resolvedId,
       title: "Crying in progress",
-      message: buildCryMessage(startedAt, null, existing.startProb ?? prob),
+      message: buildCryMessage(
+        startedAt,
+        null,
+        undefined,
+        existing.startProb ?? prob,
+      ),
       severity: "critical",
       status: "unread",
       deviceId: eventDeviceId,
@@ -253,38 +538,43 @@ function applyLiveCryPayload(
   }
 
   // cry_end
-  const index = current.findIndex(
-    (a) =>
-      (!!eventAlertId && (a.id === eventAlertId || a.alertId === eventAlertId)) ||
-      (a.isActive && a.deviceId === eventDeviceId),
-  );
-
+  let index = -1;
+  if (eventAlertId) {
+    index = current.findIndex(
+      (a) => a.id === eventAlertId || a.alertId === eventAlertId,
+    );
+  }
   if (index === -1) {
-    const orphanEndAlert: AlertType = {
-      id: eventAlertId ?? `end:${eventDeviceId}:${eventTime.getTime()}`,
-      title: "Crying ended",
-      message: `Ended at ${formatDateTime(eventTime)}.`,
-      severity: "info",
-      category: "sound",
-      status: "unread",
-      timestamp: eventTime,
-      icon: "volume-high-outline",
-      deviceId: eventDeviceId,
-      alertId: eventAlertId,
-      startedAt: eventTime,
-      endedAt: eventTime,
-      isActive: false,
-      endProb: prob,
-    };
-    return sortAndCap([orphanEndAlert, ...current]);
+    index = current.findIndex(
+      (a) => a.isActive && a.deviceId === eventDeviceId,
+    );
+  }
+  if (index === -1) {
+    // Ignore duplicate/noise end packets when we cannot map them to an active session.
+    return current;
   }
 
   const existing = current[index];
+  if (!existing.isActive) {
+    // We already ended this alert; ignore repeated end packets.
+    return current;
+  }
+
   const startedAt = existing.startedAt ?? existing.timestamp ?? eventTime;
+  const resolvedId = eventAlertId ?? existing.id;
   const updated: AlertType = {
     ...existing,
-    title: "Crying ended",
-    message: buildCryMessage(startedAt, eventTime, existing.startProb, prob),
+    id: resolvedId,
+    title: `Crying detected (${formatDurationSeconds(
+      resolveDurationSeconds(startedAt, eventTime),
+    )})`,
+    message: buildCryMessage(
+      startedAt,
+      eventTime,
+      undefined,
+      existing.startProb,
+      prob,
+    ),
     severity: "warning",
     status: "unread",
     alertId: eventAlertId ?? existing.alertId,
@@ -299,8 +589,161 @@ function applyLiveCryPayload(
   return sortAndCap(next);
 }
 
+function applyLiveSleepPayload(
+  current: AlertType[],
+  payload: SleepAlertPayload,
+): AlertType[] {
+  const eventTime = payload.ts ? new Date(payload.ts) : new Date();
+  const eventType = payload.data?.event;
+  const eventDeviceId = payload.data?.device_id;
+  const eventEar = parseNumberValue(payload.data?.ear);
+
+  if (!eventType || !eventDeviceId) {
+    return current;
+  }
+
+  if (eventType === "baby_fell_asleep") {
+    const existingIndex = current.findIndex(
+      (a) => a.category === "sleep" && a.isActive && a.deviceId === eventDeviceId,
+    );
+
+    if (existingIndex === -1) {
+      const id = `sleep:live:${eventDeviceId}:${eventTime.getTime()}`;
+      const newAlert: AlertType = {
+        id,
+        title: "Sleeping in progress",
+        message: buildSleepMessage(eventTime, null, undefined, eventEar),
+        severity: "info",
+        category: "sleep",
+        status: "unread",
+        timestamp: eventTime,
+        icon: "moon-outline",
+        deviceId: eventDeviceId,
+        startedAt: eventTime,
+        endedAt: null,
+        isActive: true,
+      };
+      return sortAndCap([newAlert, ...current]);
+    }
+
+    const existing = current[existingIndex];
+    const startedAt = existing.startedAt ?? existing.timestamp ?? eventTime;
+    const updated: AlertType = {
+      ...existing,
+      title: "Sleeping in progress",
+      message: buildSleepMessage(startedAt, null, undefined, eventEar),
+      severity: "info",
+      status: "unread",
+      startedAt,
+      endedAt: null,
+      isActive: true,
+    };
+
+    const next = [...current];
+    next[existingIndex] = updated;
+    return sortAndCap(next);
+  }
+
+  if (eventType !== "baby_woke_up") {
+    return current;
+  }
+
+  const existingIndex = current.findIndex(
+    (a) => a.category === "sleep" && a.isActive && a.deviceId === eventDeviceId,
+  );
+
+  if (existingIndex === -1) {
+    const id = `sleep:live:${eventDeviceId}:${eventTime.getTime()}`;
+    const wakeAlert: AlertType = {
+      id,
+      title: "Baby woke up (0s)",
+      message: buildSleepMessage(eventTime, eventTime, 0, undefined, eventEar),
+      severity: "info",
+      category: "sleep",
+      status: "unread",
+      timestamp: eventTime,
+      icon: "moon-outline",
+      deviceId: eventDeviceId,
+      startedAt: eventTime,
+      endedAt: eventTime,
+      isActive: false,
+    };
+    return sortAndCap([wakeAlert, ...current]);
+  }
+
+  const existing = current[existingIndex];
+  const startedAt = existing.startedAt ?? existing.timestamp ?? eventTime;
+  const duration = resolveDurationSeconds(startedAt, eventTime);
+  const updated: AlertType = {
+    ...existing,
+    title: `Baby woke up (${formatDurationCompact(duration)})`,
+    message: buildSleepMessage(startedAt, eventTime, undefined, undefined, eventEar),
+    severity: "info",
+    status: "unread",
+    startedAt,
+    endedAt: eventTime,
+    isActive: false,
+  };
+
+  const next = [...current];
+  next[existingIndex] = updated;
+  return sortAndCap(next);
+}
+
+function applyLiveRiskyPosePayload(
+  current: AlertType[],
+  payload: AiPosePayload,
+): AlertType[] {
+  const eventTime = payload.ts ? new Date(payload.ts) : new Date();
+  const deviceId = payload.data?.device_id ?? "unknown-device";
+  const noseConfidence = parseNumberValue(payload.data?.nose_confidence);
+  const faceFound = payload.data?.face_found;
+  const eyesVisible = parseNumberValue(payload.data?.eyes_visible);
+
+  const latestForDevice = current.find(
+    (a) => a.category === "movement" && a.deviceId === deviceId,
+  );
+  if (
+    latestForDevice &&
+    eventTime.getTime() - latestForDevice.timestamp.getTime() <
+      RISKY_ALERT_MIN_GAP_MS
+  ) {
+    return current;
+  }
+
+  const parts: string[] = [`Detected at ${formatDateTime(eventTime)}.`];
+  if (noseConfidence !== undefined) {
+    parts.push(`Nose confidence: ${Math.round(noseConfidence * 100)}%.`);
+  }
+  if (faceFound !== undefined) {
+    parts.push(faceFound ? "Face found." : "Face not found.");
+  }
+  if (eyesVisible !== undefined) {
+    parts.push(`Eyes visible: ${Math.round(eyesVisible)}.`);
+  }
+
+  const newAlert: AlertType = {
+    id: `risk:live:${deviceId}:${eventTime.getTime()}`,
+    title: "Risky posture detected",
+    message: parts.join(" "),
+    severity: "critical",
+    category: "movement",
+    status: "unread",
+    timestamp: eventTime,
+    icon: "body-outline",
+    deviceId,
+    startedAt: eventTime,
+    endedAt: eventTime,
+    isActive: false,
+  };
+
+  return sortAndCap([newAlert, ...current]);
+}
+
 const AlertsScreen = () => {
   const { getToken } = useAuth();
+  const riskyStateByDeviceRef = useRef<Map<string, boolean>>(new Map());
+  const missingEndpointWarningsRef = useRef<Set<string>>(new Set());
   const [alerts, setAlerts] = useState<AlertType[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [refreshing, setRefreshing] = useState(false);
@@ -323,29 +766,62 @@ const AlertsScreen = () => {
         throw new Error("Missing auth token");
       }
 
-      const response = await fetch(`${CRY_ALERTS_URL}?limit=${MAX_ALERTS}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const headers = { Authorization: `Bearer ${token}` };
+      const [cryResponse, sleepResponse, riskyResponse] = await Promise.all([
+        fetch(`${CRY_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
+        fetch(`${SLEEP_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
+        fetch(`${RISKY_POSTURE_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
+      ]);
 
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        throw new Error(body || `Server returned ${response.status}`);
+      if (!cryResponse.ok) {
+        const body = await cryResponse.text().catch(() => "");
+        throw new Error(body || `cry alerts returned ${cryResponse.status}`);
       }
 
-      const rows = (await response.json()) as unknown[];
-      const fetchedAlerts = rows
-        .map(mapCryAlertRowToAlert)
-        .filter((alert): alert is AlertType => alert !== null);
+      const cryRows = (await cryResponse.json()) as unknown[];
+
+      const parseOptionalRows = async (
+        label: "sleep" | "risky-posture",
+        response: Response,
+      ): Promise<unknown[]> => {
+        if (response.ok) {
+          return (await response.json()) as unknown[];
+        }
+
+        if (response.status === 404) {
+          if (!missingEndpointWarningsRef.current.has(label)) {
+            missingEndpointWarningsRef.current.add(label);
+            console.warn(
+              `[AlertsScreen] Optional endpoint missing: /api/alerts/${label}. Deploy latest backend to enable history sync.`,
+            );
+          }
+          return [];
+        }
+
+        const body = await response.text().catch(() => "");
+        throw new Error(
+          body || `${label} alerts returned ${response.status}`,
+        );
+      };
+
+      const [sleepRows, riskyRows] = await Promise.all([
+        parseOptionalRows("sleep", sleepResponse),
+        parseOptionalRows("risky-posture", riskyResponse),
+      ]);
+
+      const fetchedAlerts = [
+        ...cryRows.map(mapCryAlertRowToAlert),
+        ...sleepRows.map(mapSleepAlertRowToAlert),
+        ...riskyRows.map(mapRiskyPostureRowToAlert),
+      ].filter((alert): alert is AlertType => alert !== null);
 
       setAlerts((current) => mergeFetchedWithActiveLive(fetchedAlerts, current));
       setFetchError(null);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Failed to fetch cry alerts";
+        err instanceof Error ? err.message : "Failed to fetch alerts";
       setFetchError(message);
-      console.error("[AlertsScreen] fetch cry alerts error:", message);
+      console.error("[AlertsScreen] fetch alerts error:", message);
     } finally {
       setIsLoading(false);
     }
@@ -356,7 +832,7 @@ const AlertsScreen = () => {
   }, [fetchAlerts]);
 
   useEffect(() => {
-    const disconnect = connectToCryAlertStream(
+    const disconnectCry = connectToCryAlertStream(
       (payload) => {
         setAlerts((current) => applyLiveCryPayload(current, payload));
       },
@@ -365,8 +841,36 @@ const AlertsScreen = () => {
       },
     );
 
+    const disconnectSleep = connectToSleepAlertStream(
+      (payload) => {
+        setAlerts((current) => applyLiveSleepPayload(current, payload));
+      },
+      (err) => {
+        console.error("[AlertsScreen] sleep stream error:", err.message);
+      },
+    );
+
+    const disconnectPose = connectToAiPoseStream(
+      (payload) => {
+        const deviceId = payload.data?.device_id;
+        if (!deviceId) return;
+
+        const isRisky = payload.data?.is_risky === true;
+        const previous = riskyStateByDeviceRef.current.get(deviceId) ?? false;
+        riskyStateByDeviceRef.current.set(deviceId, isRisky);
+
+        if (!isRisky || previous) return;
+        setAlerts((current) => applyLiveRiskyPosePayload(current, payload));
+      },
+      (err) => {
+        console.error("[AlertsScreen] pose stream error:", err.message);
+      },
+    );
+
     return () => {
-      disconnect();
+      disconnectCry();
+      disconnectSleep();
+      disconnectPose();
     };
   }, []);
 
@@ -375,11 +879,6 @@ const AlertsScreen = () => {
     setAlerts((prev) =>
       prev.map((a) => (a.id === alert.id ? { ...a, status: "read" } : a)),
     );
-  };
-
-  const handleDismiss = (alert: AlertType) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
   };
 
   const handleMarkAllRead = () => {
@@ -565,7 +1064,6 @@ const AlertsScreen = () => {
                   key={alert.id}
                   alert={alert}
                   onPress={handleAlertPress}
-                  onDismiss={handleDismiss}
                 />
               ))}
             </>
@@ -581,7 +1079,7 @@ const AlertsScreen = () => {
               <Text style={styles.emptyTitle}>No Alerts</Text>
               <Text style={styles.emptyMessage}>
                 {isLoading
-                  ? "Loading cry alerts..."
+                  ? "Loading alerts..."
                   : activeFilter === "all"
                     ? "You're all caught up! No alerts to display."
                     : `No ${activeFilter} alerts at this time.`}

@@ -9,25 +9,39 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs access to the camera to monitor your baby.",
         "NSMicrophoneUsageDescription": "This app needs access to the microphone for two-way audio communication.",
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to save snapshots.",
-        "NSPhotoLibraryAddUsageDescription": "This app needs access to save photos to your library."
-      }
+        "NSPhotoLibraryAddUsageDescription": "This app needs access to save photos to your library.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.sleimanelhajj.waladi"
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
       },
       "permissions": [
+        "POST_NOTIFICATIONS",
         "CAMERA",
         "RECORD_AUDIO",
         "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "WRITE_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -52,7 +66,14 @@
         {
           "microphonePermission": "Allow WALADI to access your microphone."
         }
-      ]
-    ]
+      ],
+      "expo-notifications"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "61c545f9-a8d9-46ee-a86b-ef273e4da74e"
+      }
+    },
+    "owner": "sleimanelhajj"
   }
 }

@@ -7,8 +7,14 @@
  */
 
 import { startServer } from "./server";
+import { startCryPushNotifications } from "./cryPushNotifications";
 
-startServer().catch((err) => {
-  console.error("[startup] Failed to start backend:", err);
+async function bootstrap(): Promise<void> {
+  await startServer();
+  await startCryPushNotifications();
+}
+
+bootstrap().catch((err) => {
+  console.error("[startup] Failed to start backend services:", err);
   process.exit(1);
 });

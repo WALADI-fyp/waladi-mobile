@@ -20,7 +20,7 @@ import CameraStream from "./CameraStream";
 interface FullScreenVideoModalProps {
   visible: boolean;
   isLive: boolean;
-  position: string;
+  isRisky: boolean;
   onClose: () => void;
 }
 
@@ -29,7 +29,7 @@ const { width, height } = Dimensions.get("window");
 const FullScreenVideoModal: React.FC<FullScreenVideoModalProps> = ({
   visible,
   isLive,
-  position,
+  isRisky,
   onClose,
 }) => {
   const scaleAnim = new Animated.Value(0.8);
@@ -38,6 +38,9 @@ const FullScreenVideoModal: React.FC<FullScreenVideoModalProps> = ({
 
   const [isRecording, setIsRecording] = useState(false);
   const [isTalking, setIsTalking] = useState(false);
+  const postureColor = isRisky ? COLORS.error : COLORS.success;
+  const postureLabel = isRisky ? "Unsafe" : "Safe";
+  const postureIcon = isRisky ? "alert-circle" : "checkmark-circle";
 
   useEffect(() => {
     if (visible) {
@@ -187,11 +190,11 @@ const FullScreenVideoModal: React.FC<FullScreenVideoModalProps> = ({
             <View style={styles.positionOverlay}>
               <View style={styles.positionBadge}>
                 <Ionicons
-                  name="checkmark-circle"
+                  name={postureIcon as keyof typeof Ionicons.glyphMap}
                   size={16}
-                  color={COLORS.success}
+                  color={postureColor}
                 />
-                <Text style={styles.positionText}>Safe - {position}</Text>
+                <Text style={styles.positionText}>{postureLabel}</Text>
               </View>
             </View>
           </View>

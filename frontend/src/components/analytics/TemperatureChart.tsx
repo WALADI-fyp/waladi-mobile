@@ -6,18 +6,37 @@ import { ChartDataPoint } from "../../types/analytics.types";
 
 interface TemperatureChartProps {
   title: string;
+  subtitle?: string;
   data: ChartDataPoint[];
+  lineColor?: string;
+  decimalPlaces?: number;
+  yAxisSuffix?: string;
 }
 
-const TemperatureChart: React.FC<TemperatureChartProps> = ({ title, data }) => {
+const TemperatureChart: React.FC<TemperatureChartProps> = ({
+  title,
+  subtitle,
+  data,
+  lineColor = "#FF9800",
+  decimalPlaces = 1,
+  yAxisSuffix = "",
+}) => {
   const screenWidth = Dimensions.get("window").width - LAYOUT.spacing.md * 2;
+  const safeData = data.length > 0 ? data : [{ time: "-", value: 0 }];
 
   const chartData = {
-    labels: data.map((point) => point.time),
+    labels: safeData.map((point) => point.time),
     datasets: [
       {
-        data: data.map((point) => point.value),
-        color: (opacity = 1) => `rgba(255, 152, 0, ${opacity})`, // Orange color
+        data: safeData.map((point) => point.value),
+        color: (opacity = 1) => {
+          const hex = lineColor.replace("#", "");
+          if (hex.length !== 6) return `rgba(255, 152, 0, ${opacity})`;
+          const r = parseInt(hex.slice(0, 2), 16);
+          const g = parseInt(hex.slice(2, 4), 16);
+          const b = parseInt(hex.slice(4, 6), 16);
+          return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+        },
         strokeWidth: 2,
       },
     ],
@@ -27,8 +46,8 @@ const TemperatureChart: React.FC<TemperatureChartProps> = ({ title, data }) => {
     backgroundColor: COLORS.white,
     backgroundGradientFrom: COLORS.white,
     backgroundGradientTo: COLORS.white,
-    decimalPlaces: 0,
-    color: (opacity = 1) => `rgba(255, 152, 0, ${opacity})`,
+    decimalPlaces,
+    color: (opacity = 1) => chartData.datasets[0].color(opacity),
     labelColor: (opacity = 1) => `rgba(117, 117, 117, ${opacity})`,
     style: {
       borderRadius: LAYOUT.borderRadius.md,
@@ -48,12 +67,18 @@ const TemperatureChart: React.FC<TemperatureChartProps> = ({ title, data }) => {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{title}</Text>
+      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+
+      {data.length === 0 ? (
+        <Text style={styles.emptyText}>No weekly chart data yet.</Text>
+      ) : null}
 
       <LineChart
         data={chartData}
         width={screenWidth - LAYOUT.spacing.md * 2}
         height={180}
         chartConfig={chartConfig}
+        yAxisSuffix={yAxisSuffix}
         bezier
         style={styles.chart}
         withInnerLines={true}
@@ -86,7 +111,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: COLORS.textPrimary,
-    marginBottom: LAYOUT.spacing.sm,
+  },
+  subtitle: {
+    marginTop: 2,
+    marginBottom: LAYOUT.spacing.xs,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  emptyText: {
+    marginTop: LAYOUT.spacing.sm,
+    fontSize: 12,
+    color: COLORS.textSecondary,
   },
   chart: {
     marginVertical: LAYOUT.spacing.sm,

@@ -7,14 +7,12 @@ import CameraStream from "./CameraStream";
 
 interface LiveVideoPlayerProps {
   isLive: boolean;
-  position: string;
   positionStatus: "safe" | "warning" | "danger";
   onFullScreenPress: () => void;
 }
 
 const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   isLive,
-  position,
   positionStatus,
   onFullScreenPress,
 }) => {
@@ -30,6 +28,26 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         return COLORS.gray;
     }
   };
+
+  const getStatusIcon = () => {
+    switch (positionStatus) {
+      case "safe":
+        return "checkmark-circle";
+      case "warning":
+        return "warning";
+      case "danger":
+        return "alert-circle";
+      default:
+        return "help-circle";
+    }
+  };
+
+  const statusLabel =
+    positionStatus === "danger"
+      ? "Unsafe"
+      : positionStatus === "warning"
+        ? "Warning"
+        : "Safe";
 
   return (
     <View style={styles.container}>
@@ -52,12 +70,12 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       <View style={styles.footer}>
         <View style={styles.positionContainer}>
           <Ionicons
-            name="checkmark-circle"
+            name={getStatusIcon() as keyof typeof Ionicons.glyphMap}
             size={16}
             color={getStatusColor()}
           />
           <Text style={styles.positionText}>
-            Safe - <Text style={styles.positionBold}>{position}</Text>
+            <Text style={styles.positionBold}>{statusLabel}</Text>
           </Text>
         </View>
 
