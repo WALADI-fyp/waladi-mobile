@@ -46,9 +46,6 @@ const MonitorScreen = () => {
     };
   }, []);
 
-  const postureLabel = isRiskyPose
-    ? "Posture needs attention"
-    : "Posture looks safe";
   const postureStatus = isRiskyPose ? "danger" : "safe";
 
   // Connection status display
@@ -85,7 +82,6 @@ const MonitorScreen = () => {
           <AnimatedCard delay={0}>
             <LiveVideoPlayer
               isLive={DUMMY_MONITOR_DATA.isLive}
-              position={postureLabel}
               positionStatus={postureStatus}
               onFullScreenPress={handleFullScreen}
             />
@@ -154,7 +150,6 @@ const MonitorScreen = () => {
         visible={isFullScreenVisible}
         isLive={DUMMY_MONITOR_DATA.isLive}
         isRisky={isRiskyPose}
-        position={postureLabel}
         onClose={handleCloseFullScreen}
       />
     </SafeAreaView>

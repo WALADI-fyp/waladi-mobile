@@ -7,14 +7,12 @@ import CameraStream from "./CameraStream";
 
 interface LiveVideoPlayerProps {
   isLive: boolean;
-  position: string;
   positionStatus: "safe" | "warning" | "danger";
   onFullScreenPress: () => void;
 }
 
 const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   isLive,
-  position,
   positionStatus,
   onFullScreenPress,
 }) => {
@@ -46,7 +44,7 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
   const statusLabel =
     positionStatus === "danger"
-      ? "Risky"
+      ? "Unsafe"
       : positionStatus === "warning"
         ? "Warning"
         : "Safe";
@@ -77,7 +75,7 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
             color={getStatusColor()}
           />
           <Text style={styles.positionText}>
-            {statusLabel} - <Text style={styles.positionBold}>{position}</Text>
+            <Text style={styles.positionBold}>{statusLabel}</Text>
           </Text>
         </View>
 

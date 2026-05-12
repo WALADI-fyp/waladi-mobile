@@ -21,7 +21,6 @@ interface FullScreenVideoModalProps {
   visible: boolean;
   isLive: boolean;
   isRisky: boolean;
-  position: string;
   onClose: () => void;
 }
 
@@ -31,7 +30,6 @@ const FullScreenVideoModal: React.FC<FullScreenVideoModalProps> = ({
   visible,
   isLive,
   isRisky,
-  position,
   onClose,
 }) => {
   const scaleAnim = new Animated.Value(0.8);
@@ -41,7 +39,7 @@ const FullScreenVideoModal: React.FC<FullScreenVideoModalProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [isTalking, setIsTalking] = useState(false);
   const postureColor = isRisky ? COLORS.error : COLORS.success;
-  const postureLabel = isRisky ? "Risky" : "Safe";
+  const postureLabel = isRisky ? "Unsafe" : "Safe";
   const postureIcon = isRisky ? "alert-circle" : "checkmark-circle";
 
   useEffect(() => {
@@ -196,7 +194,7 @@ const FullScreenVideoModal: React.FC<FullScreenVideoModalProps> = ({
                   size={16}
                   color={postureColor}
                 />
-                <Text style={styles.positionText}>{postureLabel} - {position}</Text>
+                <Text style={styles.positionText}>{postureLabel}</Text>
               </View>
             </View>
           </View>
