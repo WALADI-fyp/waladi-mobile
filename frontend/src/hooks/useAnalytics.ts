@@ -1,5 +1,5 @@
 import { useAuth } from "@clerk/clerk-expo";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ANALYTICS_URL } from "../services/backend/config";
 import {
   AnalyticsApiResponse,
@@ -9,6 +9,15 @@ import {
 
 const DEFAULT_WEEKS = 8;
 const MAX_WEEKS = 52;
+
+function logAnalyticsDebug(message: string, data?: unknown): void {
+  if (!__DEV__) return;
+  if (data === undefined) {
+    console.log(`[useAnalytics] ${message}`);
+    return;
+  }
+  console.log(`[useAnalytics] ${message}`, data);
+}
 
 function parseNumber(value: number | string | null | undefined): number {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -65,23 +74,29 @@ export function useAnalytics(requestedWeeks: number = DEFAULT_WEEKS): UseAnalyti
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
+  const getTokenRef = useRef(getToken);
 
   const weeks = useMemo(
     () => Math.min(Math.max(1, Math.round(requestedWeeks)), MAX_WEEKS),
     [requestedWeeks],
   );
 
-  const fetchAnalytics = useCallback(
-    async (refresh = false) => {
-      if (refresh) {
-        setIsRefreshing(true);
-      } else {
-        setIsLoading(true);
-      }
+  useEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
+
+  useEffect(() => {
+    let isActive = true;
+    const requestId = ++requestIdRef.current;
+
+    const run = async () => {
+      setIsLoading(true);
       setError(null);
 
       try {
-        const token = await getToken();
+        logAnalyticsDebug("Initial fetch started", { weeks });
+        const token = await getTokenRef.current();
         if (!token) {
           throw new Error("Missing auth token. Please sign in again.");
         }
@@ -91,37 +106,91 @@ export function useAnalytics(requestedWeeks: number = DEFAULT_WEEKS): UseAnalyti
             Authorization: `Bearer ${token}`,
           },
         });
+        logAnalyticsDebug("Initial fetch response status", response.status);
 
         if (!response.ok) {
           const body = await response.text().catch(() => "");
+          logAnalyticsDebug("Initial fetch failed response body", body);
           const detail = body ? ` (${body.slice(0, 120)})` : "";
           throw new Error(`Analytics request failed with ${response.status}${detail}`);
         }
 
         const payload = (await response.json()) as AnalyticsApiResponse;
+        logAnalyticsDebug("Initial fetch payload", payload);
         const rows = Array.isArray(payload.weeks) ? payload.weeks : [];
-        setReports(rows.map(mapApiRow));
+        logAnalyticsDebug("Initial fetch weekly row count", rows.length);
+        if (isActive && requestId === requestIdRef.current) {
+          setReports(rows.map(mapApiRow));
+        }
       } catch (err: any) {
         const message =
           typeof err?.message === "string" && err.message.length > 0
             ? err.message
             : "Failed to load analytics.";
-        setError(message);
+        if (isActive && requestId === requestIdRef.current) {
+          setError(message);
+        }
       } finally {
-        setIsLoading(false);
+        if (isActive && requestId === requestIdRef.current) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      isActive = false;
+    };
+  }, [weeks]);
+
+  const refetch = async () => {
+    const requestId = ++requestIdRef.current;
+    setIsRefreshing(true);
+    setError(null);
+
+    try {
+      logAnalyticsDebug("Manual refresh started", { weeks });
+      const token = await getTokenRef.current();
+      if (!token) {
+        throw new Error("Missing auth token. Please sign in again.");
+      }
+
+      const response = await fetch(`${ANALYTICS_URL}?weeks=${weeks}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      logAnalyticsDebug("Manual refresh response status", response.status);
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        logAnalyticsDebug("Manual refresh failed response body", body);
+        const detail = body ? ` (${body.slice(0, 120)})` : "";
+        throw new Error(`Analytics request failed with ${response.status}${detail}`);
+      }
+
+      const payload = (await response.json()) as AnalyticsApiResponse;
+      logAnalyticsDebug("Manual refresh payload", payload);
+      const rows = Array.isArray(payload.weeks) ? payload.weeks : [];
+      logAnalyticsDebug("Manual refresh weekly row count", rows.length);
+      if (requestId === requestIdRef.current) {
+        setReports(rows.map(mapApiRow));
+      }
+    } catch (err: any) {
+      const message =
+        typeof err?.message === "string" && err.message.length > 0
+          ? err.message
+          : "Failed to load analytics.";
+      if (requestId === requestIdRef.current) {
+        setError(message);
+      }
+    } finally {
+      if (requestId === requestIdRef.current) {
         setIsRefreshing(false);
       }
-    },
-    [getToken, weeks],
-  );
-
-  useEffect(() => {
-    void fetchAnalytics(false);
-  }, [fetchAnalytics]);
-
-  const refetch = useCallback(async () => {
-    await fetchAnalytics(true);
-  }, [fetchAnalytics]);
+    }
+  };
 
   return { reports, isLoading, isRefreshing, error, refetch };
 }

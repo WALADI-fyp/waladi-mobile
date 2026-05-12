@@ -337,6 +337,7 @@ const AnalyticsScreen = () => {
               <Text style={styles.emptyTitle}>No weekly report data yet</Text>
               <Text style={styles.emptyText}>
                 Weekly summaries will appear here once your device uploads report rows.
+                Make sure `weekly_reports.user_id` matches the currently signed-in account.
               </Text>
             </View>
           ) : (
