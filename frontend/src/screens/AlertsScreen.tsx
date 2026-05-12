@@ -207,23 +207,58 @@ function sortAndCap(alerts: AlertType[]): AlertType[] {
     .slice(0, MAX_ALERTS);
 }
 
+function isCloseTime(a: Date | undefined, b: Date | undefined, ms: number): boolean {
+  if (!a || !b) return false;
+  return Math.abs(a.getTime() - b.getTime()) <= ms;
+}
+
+function isSameAlertSemantic(fetched: AlertType, live: AlertType): boolean {
+  if (fetched.id === live.id) return true;
+
+  if (fetched.alertId && live.alertId && fetched.alertId === live.alertId) {
+    return true;
+  }
+
+  if (fetched.category !== live.category) return false;
+  if (!fetched.deviceId || !live.deviceId) return false;
+  if (fetched.deviceId !== live.deviceId) return false;
+
+  if (fetched.category === "sleep") {
+    const fetchedStart = fetched.startedAt ?? fetched.timestamp;
+    const liveStart = live.startedAt ?? live.timestamp;
+    return isCloseTime(fetchedStart, liveStart, 15_000);
+  }
+
+  if (fetched.category === "movement") {
+    return isCloseTime(fetched.timestamp, live.timestamp, 10_000);
+  }
+
+  if (fetched.category === "sound") {
+    const fetchedStart = fetched.startedAt ?? fetched.timestamp;
+    const liveStart = live.startedAt ?? live.timestamp;
+    return isCloseTime(fetchedStart, liveStart, 8_000);
+  }
+
+  return false;
+}
+
 function mergeFetchedWithActiveLive(
   fetched: AlertType[],
   current: AlertType[],
 ): AlertType[] {
-  const byId = new Map<string, AlertType>();
+  const merged = [...fetched];
 
-  for (const alert of fetched) {
-    byId.set(alert.id, alert);
-  }
+  for (const liveAlert of current) {
+    const alreadyPresent = merged.some((fetchedAlert) =>
+      isSameAlertSemantic(fetchedAlert, liveAlert),
+    );
 
-  for (const alert of current) {
-    if (!byId.has(alert.id)) {
-      byId.set(alert.id, alert);
+    if (!alreadyPresent) {
+      merged.push(liveAlert);
     }
   }
 
-  return sortAndCap(Array.from(byId.values()));
+  return sortAndCap(merged);
 }
 
 function mapCryAlertRowToAlert(raw: unknown): AlertType | null {

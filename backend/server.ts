@@ -91,6 +91,43 @@ async function ensureDerivedAlertTables(): Promise<void> {
   );
 }
 
+async function ensureWeeklyReportsTable(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS weekly_reports (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      week_start TIMESTAMPTZ NOT NULL,
+      week_end TIMESTAMPTZ NOT NULL,
+      avg_heart_rate_bpm DOUBLE PRECISION,
+      avg_breathing_rate_bpm DOUBLE PRECISION,
+      avg_room_temperature_c DOUBLE PRECISION,
+      avg_room_humidity_rh DOUBLE PRECISION,
+      avg_body_temperature_c DOUBLE PRECISION,
+      total_cry_events INTEGER NOT NULL DEFAULT 0,
+      total_cry_duration_s DOUBLE PRECISION NOT NULL DEFAULT 0,
+      longest_cry_duration_s DOUBLE PRECISION NOT NULL DEFAULT 0,
+      total_sleep_sessions INTEGER NOT NULL DEFAULT 0,
+      total_sleep_duration_s DOUBLE PRECISION NOT NULL DEFAULT 0,
+      avg_sleep_duration_s DOUBLE PRECISION NOT NULL DEFAULT 0,
+      longest_sleep_duration_s DOUBLE PRECISION NOT NULL DEFAULT 0,
+      total_risky_posture_events INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, device_id, week_start)
+    )
+  `);
+
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_weekly_reports_user_week
+     ON weekly_reports(user_id, week_start DESC)`,
+  );
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_weekly_reports_user_device_week
+     ON weekly_reports(user_id, device_id, week_start DESC)`,
+  );
+}
+
 // Clerk middleware — parses auth on all requests (non-blocking)
 app.use(clerkMiddleware());
 
@@ -324,56 +361,80 @@ app.post("/api/notifications/expo-token", requireAuth(), async (req: any, res) =
 });
 
 // ── GET /api/analytics (auth required) ──
-// Returns time-bucketed averages for all vitals.
+// Returns weekly report analytics rows for the authenticated user.
 //
 // Query params:
-//   range  → "24h" (default) | "7d" | "30d"
+//   weeks      -> number of rows to return (default 8, max 52)
+//   device_id  -> optional filter by device
 //
-// Bucket sizes:
-//   24h  → 1-hour buckets
-//   7d   → 6-hour buckets
-//   30d  → 1-day buckets
+// Notes:
+// - Rows are returned in ascending week order.
+// - `notes` is intentionally excluded from the API response.
 app.get("/api/analytics", requireAuth(), async (req: any, res) => {
   const { userId } = getAuth(req);
-  const range = (req.query.range as string) || "24h";
-
-  let interval: string;
-  let bucket: string;
-
-  switch (range) {
-    case "7d":
-      interval = "7 days";
-      bucket = "6 hours";
-      break;
-    case "30d":
-      interval = "30 days";
-      bucket = "1 day";
-      break;
-    case "24h":
-    default:
-      interval = "24 hours";
-      bucket = "1 hour";
-      break;
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
+  const parsedWeeks = parseInt((req.query.weeks as string) || "8", 10);
+  const weeks = Number.isFinite(parsedWeeks)
+    ? Math.max(1, Math.min(parsedWeeks, 52))
+    : 8;
+  const deviceId =
+    typeof req.query.device_id === "string" && req.query.device_id.trim().length > 0
+      ? req.query.device_id.trim()
+      : null;
+
   try {
+    const params: Array<string | number> = [userId];
+    let deviceFilter = "";
+
+    if (deviceId) {
+      params.push(deviceId);
+      deviceFilter = `AND wr.device_id = $${params.length}`;
+    }
+
+    params.push(weeks);
+    const limitParamIndex = params.length;
+
     const result = await pool.query(
-      `SELECT
-         time_bucket($1::interval, time)   AS bucket,
-         AVG(heart_rate_bpm)               AS avg_heart_rate,
-         AVG(breathing_rate_bpm)           AS avg_breathing_rate,
-         AVG(body_temperature_c)           AS avg_body_temp,
-         AVG(room_temperature_c)           AS avg_room_temp,
-         AVG(room_humidity_rh)             AS avg_humidity,
-         COUNT(*)                          AS sample_count
-       FROM sensor_readings
-       WHERE user_id = $2
-         AND time >= NOW() - $3::interval
-       GROUP BY bucket
-       ORDER BY bucket ASC`,
-      [bucket, userId, interval],
+      `WITH latest_weeks AS (
+         SELECT
+           wr.user_id,
+           wr.device_id,
+           wr.week_start,
+           wr.week_end,
+           wr.avg_heart_rate_bpm,
+           wr.avg_breathing_rate_bpm,
+           wr.avg_room_temperature_c,
+           wr.avg_room_humidity_rh,
+           wr.avg_body_temperature_c,
+           wr.total_cry_events,
+           wr.total_cry_duration_s,
+           wr.longest_cry_duration_s,
+           wr.total_sleep_sessions,
+           wr.total_sleep_duration_s,
+           wr.avg_sleep_duration_s,
+           wr.longest_sleep_duration_s,
+           wr.total_risky_posture_events,
+           wr.created_at
+         FROM weekly_reports wr
+         WHERE wr.user_id = $1
+           ${deviceFilter}
+         ORDER BY wr.week_start DESC
+         LIMIT $${limitParamIndex}
+       )
+       SELECT *
+       FROM latest_weeks
+       ORDER BY week_start ASC`,
+      params,
     );
-    return res.json(result.rows);
+    return res.json({
+      weeks: result.rows,
+      total_weeks: result.rows.length,
+      requested_weeks: weeks,
+      device_id: deviceId,
+    });
   } catch (err) {
     console.error("[server] /api/analytics error:", err);
     return res.status(500).json({ error: "Failed to fetch analytics" });
@@ -384,6 +445,7 @@ export async function startServer(): Promise<void> {
   await verifyDatabaseConnection();
   await ensurePushTokenTable();
   await ensureDerivedAlertTables();
+  await ensureWeeklyReportsTable();
 
   app.listen(PORT, () => {
     console.log(`[server] Listening on http://0.0.0.0:${PORT}`);
@@ -395,6 +457,6 @@ export async function startServer(): Promise<void> {
     console.log(`[server]   GET  /api/alerts/sleep`);
     console.log(`[server]   GET  /api/alerts/risky-posture`);
     console.log(`[server]   POST /api/notifications/expo-token`);
-    console.log(`[server]   GET  /api/analytics?range=24h|7d|30d`);
+    console.log(`[server]   GET  /api/analytics?weeks=8&device_id=<optional>`);
   });
 }
