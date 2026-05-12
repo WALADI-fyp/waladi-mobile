@@ -263,11 +263,7 @@ async function pushSleepStart(row: Record<string, unknown>, sessionKey: string) 
   const userIds = await resolveUserIds(row);
   if (userIds.length === 0) return;
 
-  const ear =
-    parseNumber(row.ear_start) ??
-    parseNumber(row.start_ear) ??
-    parseNumber(row.ear);
-  const body = ear !== null ? `Baby fell asleep (EAR ${ear.toFixed(3)}).` : "Baby fell asleep.";
+  const body = "Baby fell asleep.";
 
   await sendPushForUsers(userIds, (to) => ({
     to,

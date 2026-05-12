@@ -182,15 +182,11 @@ function buildSleepMessage(
   startedAt: Date,
   endedAt: Date | null,
   durationSeconds?: number,
-  startEar?: number,
-  endEar?: number,
+  _startEar?: number,
+  _endEar?: number,
 ): string {
   const parts: string[] = [];
   parts.push(`Started at ${formatDateTime(startedAt)}.`);
-
-  if (startEar !== undefined && Number.isFinite(startEar)) {
-    parts.push(`Start EAR: ${startEar.toFixed(3)}.`);
-  }
 
   if (!endedAt) {
     parts.push("Still currently sleeping.");
@@ -198,9 +194,6 @@ function buildSleepMessage(
   }
 
   parts.push(`Woke up at ${formatDateTime(endedAt)}.`);
-  if (endEar !== undefined && Number.isFinite(endEar)) {
-    parts.push(`Wake EAR: ${endEar.toFixed(3)}.`);
-  }
 
   const resolved = resolveDurationSeconds(startedAt, endedAt, durationSeconds);
   parts.push(`Slept for ${formatDurationCompact(resolved)}.`);
@@ -715,6 +708,7 @@ function applyLiveRiskyPosePayload(
 const AlertsScreen = () => {
   const { getToken } = useAuth();
   const riskyStateByDeviceRef = useRef<Map<string, boolean>>(new Map());
+  const missingEndpointWarningsRef = useRef<Set<string>>(new Set());
   const [alerts, setAlerts] = useState<AlertType[]>([]);
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [refreshing, setRefreshing] = useState(false);
@@ -744,27 +738,41 @@ const AlertsScreen = () => {
         fetch(`${RISKY_POSTURE_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
       ]);
 
-      if (!cryResponse.ok || !sleepResponse.ok || !riskyResponse.ok) {
-        const responses = [
-          { label: "cry", response: cryResponse },
-          { label: "sleep", response: sleepResponse },
-          { label: "risky posture", response: riskyResponse },
-        ];
-
-        const failed = responses.find(({ response }) => !response.ok);
-        if (failed) {
-          const body = await failed.response.text().catch(() => "");
-          throw new Error(
-            body || `${failed.label} alerts returned ${failed.response.status}`,
-          );
-        }
+      if (!cryResponse.ok) {
+        const body = await cryResponse.text().catch(() => "");
+        throw new Error(body || `cry alerts returned ${cryResponse.status}`);
       }
 
-      const [cryRows, sleepRows, riskyRows] = (await Promise.all([
-        cryResponse.json(),
-        sleepResponse.json(),
-        riskyResponse.json(),
-      ])) as [unknown[], unknown[], unknown[]];
+      const cryRows = (await cryResponse.json()) as unknown[];
+
+      const parseOptionalRows = async (
+        label: "sleep" | "risky-posture",
+        response: Response,
+      ): Promise<unknown[]> => {
+        if (response.ok) {
+          return (await response.json()) as unknown[];
+        }
+
+        if (response.status === 404) {
+          if (!missingEndpointWarningsRef.current.has(label)) {
+            missingEndpointWarningsRef.current.add(label);
+            console.warn(
+              `[AlertsScreen] Optional endpoint missing: /api/alerts/${label}. Deploy latest backend to enable history sync.`,
+            );
+          }
+          return [];
+        }
+
+        const body = await response.text().catch(() => "");
+        throw new Error(
+          body || `${label} alerts returned ${response.status}`,
+        );
+      };
+
+      const [sleepRows, riskyRows] = await Promise.all([
+        parseOptionalRows("sleep", sleepResponse),
+        parseOptionalRows("risky-posture", riskyResponse),
+      ]);
 
       const fetchedAlerts = [
         ...cryRows.map(mapCryAlertRowToAlert),
