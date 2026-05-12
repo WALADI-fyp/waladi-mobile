@@ -38,6 +38,7 @@ const CATEGORY_ICONS: Record<string, string> = {
   humidity: "water-outline",
   movement: "body-outline",
   sound: "volume-high-outline",
+  sleep: "moon-outline",
   breathing: "fitness-outline",
   system: "settings-outline",
 };

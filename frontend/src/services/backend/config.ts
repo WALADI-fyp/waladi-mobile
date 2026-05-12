@@ -15,6 +15,7 @@ export const MQTT_TOPIC = "state/baby";
 export const CAMERA_TOPIC = "camera/snapshot";
 export const AI_POSE_TOPIC = "waladi/ai/pose";
 export const CRY_ALERT_TOPIC = "waladi/alerts/cry";
+export const SLEEP_ALERT_TOPIC = "waladi/ai/sleep";
 
 // ── Node.js REST API (deployed on Render) ──
 export const BACKEND_URL = "https://waladi-mobile.onrender.com";
@@ -24,4 +25,6 @@ export const DEVICES_URL = `${BACKEND_URL}/api/devices`;
 export const SENSOR_DATA_URL = `${BACKEND_URL}/api/sensor-data`;
 export const ANALYTICS_URL = `${BACKEND_URL}/api/analytics`;
 export const CRY_ALERTS_URL = `${BACKEND_URL}/api/alerts/cry`;
+export const SLEEP_ALERTS_URL = `${BACKEND_URL}/api/alerts/sleep`;
+export const RISKY_POSTURE_ALERTS_URL = `${BACKEND_URL}/api/alerts/risky-posture`;
 export const EXPO_PUSH_TOKEN_URL = `${BACKEND_URL}/api/notifications/expo-token`;

@@ -5,6 +5,7 @@ import * as Notifications from "expo-notifications";
 import { EXPO_PUSH_TOKEN_URL } from "../services/backend/config";
 
 const CRY_ALERT_CHANNEL_ID = "cry-alerts";
+const EXPO_PROJECT_ID = "61c545f9-a8d9-46ee-a86b-ef273e4da74e";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -102,7 +103,9 @@ export function useCryAlertNotifications(): void {
     }
 
     try {
-      const expoToken = await Notifications.getExpoPushTokenAsync();
+      const expoToken = await Notifications.getExpoPushTokenAsync({
+        projectId: EXPO_PROJECT_ID,
+      });
       if (!isExpoPushToken(expoToken.data)) {
         console.warn("[push] Invalid Expo push token shape");
         return;

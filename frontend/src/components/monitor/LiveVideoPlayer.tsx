@@ -31,6 +31,26 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     }
   };
 
+  const getStatusIcon = () => {
+    switch (positionStatus) {
+      case "safe":
+        return "checkmark-circle";
+      case "warning":
+        return "warning";
+      case "danger":
+        return "alert-circle";
+      default:
+        return "help-circle";
+    }
+  };
+
+  const statusLabel =
+    positionStatus === "danger"
+      ? "Risky"
+      : positionStatus === "warning"
+        ? "Warning"
+        : "Safe";
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -52,12 +72,12 @@ const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       <View style={styles.footer}>
         <View style={styles.positionContainer}>
           <Ionicons
-            name="checkmark-circle"
+            name={getStatusIcon() as keyof typeof Ionicons.glyphMap}
             size={16}
             color={getStatusColor()}
           />
           <Text style={styles.positionText}>
-            Safe - <Text style={styles.positionBold}>{position}</Text>
+            {statusLabel} - <Text style={styles.positionBold}>{position}</Text>
           </Text>
         </View>
 
