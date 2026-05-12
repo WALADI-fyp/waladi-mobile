@@ -24,17 +24,21 @@ import {
   CRY_ALERTS_URL,
   SLEEP_ALERTS_URL,
   RISKY_POSTURE_ALERTS_URL,
+  TEMPERATURE_ALERTS_URL,
 } from "../services/backend/config";
 import { connectToCryAlertStream } from "../services/backend/cryAlertClient";
 import { connectToSleepAlertStream } from "../services/backend/sleepAlertClient";
 import { connectToAiPoseStream } from "../services/backend/aiPoseClient";
+import { connectToTemperatureAlertStream } from "../services/backend/temperatureAlertClient";
 import {
   AiPosePayload,
   CryAlertPayload,
   SleepAlertPayload,
+  TemperatureAlertPayload,
 } from "../services/backend/types";
 
 type FilterType = "all" | "critical" | "warning" | "info";
+type TemperatureAlertSeverity = "normal_high" | "moderately_high" | "severe";
 
 const MAX_ALERTS = 50;
 const RISKY_ALERT_MIN_GAP_MS = 60_000;
@@ -81,6 +85,17 @@ function parseStringValue(value: unknown): string | undefined {
   return v.length > 0 ? v : undefined;
 }
 
+function parseIdentifierValue(value: unknown): string | undefined {
+  const asString = parseStringValue(value);
+  if (asString) return asString;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return undefined;
+}
+
 function parseSeverity(value: unknown, isActive: boolean): AlertSeverity {
   if (value === "critical" || value === "warning" || value === "info") {
     return value;
@@ -93,6 +108,41 @@ function parseStatus(value: unknown, isActive: boolean): AlertStatus {
     return value;
   }
   return isActive ? "unread" : "read";
+}
+
+function classifyTemperatureSeverity(
+  temperatureC: number,
+): TemperatureAlertSeverity | null {
+  if (temperatureC <= 37.0) return null;
+  if (temperatureC <= 37.5) return "normal_high";
+  if (temperatureC <= 38.0) return "moderately_high";
+  return "severe";
+}
+
+function parseTemperatureSeverity(
+  value: unknown,
+  temperatureC: number | undefined,
+): TemperatureAlertSeverity | null {
+  if (
+    value === "normal_high" ||
+    value === "moderately_high" ||
+    value === "severe"
+  ) {
+    return value;
+  }
+
+  if (temperatureC === undefined || !Number.isFinite(temperatureC)) {
+    return null;
+  }
+  return classifyTemperatureSeverity(temperatureC);
+}
+
+function mapTemperatureSeverityToAlertSeverity(
+  severity: TemperatureAlertSeverity,
+): AlertSeverity {
+  if (severity === "severe") return "critical";
+  if (severity === "moderately_high") return "warning";
+  return "info";
 }
 
 function formatDateTime(date: Date): string {
@@ -239,6 +289,10 @@ function isSameAlertSemantic(fetched: AlertType, live: AlertType): boolean {
     return isCloseTime(fetchedStart, liveStart, 8_000);
   }
 
+  if (fetched.category === "temperature") {
+    return isCloseTime(fetched.timestamp, live.timestamp, 10_000);
+  }
+
   return false;
 }
 
@@ -350,7 +404,7 @@ function mapSleepAlertRowToAlert(raw: unknown): AlertType | null {
   const alertId =
     parseStringValue(row.alert_id) ??
     parseStringValue(row.alertId) ??
-    parseStringValue(row.id);
+    parseIdentifierValue(row.id);
   const deviceId =
     parseStringValue(row.device_id) ??
     parseStringValue(row.deviceId) ??
@@ -467,6 +521,74 @@ function mapRiskyPostureRowToAlert(raw: unknown): AlertType | null {
     alertId,
     startedAt: detectedAt,
     endedAt: detectedAt,
+    isActive: false,
+  };
+}
+
+function mapTemperatureAlertRowToAlert(raw: unknown): AlertType | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const row = raw as Record<string, unknown>;
+  const createdAt =
+    parseDateValue(row.created_at) ??
+    parseDateValue(row.createdAt) ??
+    parseDateValue(row.ts) ??
+    new Date();
+
+  const temperatureC =
+    parseNumberValue(row.temperature_c) ?? parseNumberValue(row.temperatureC);
+  if (temperatureC === undefined || !Number.isFinite(temperatureC)) {
+    return null;
+  }
+
+  const tempSeverity = parseTemperatureSeverity(row.severity, temperatureC);
+  if (!tempSeverity) {
+    return null;
+  }
+
+  const alertId =
+    parseStringValue(row.alert_id) ??
+    parseStringValue(row.alertId) ??
+    parseStringValue(row.id);
+  const deviceId =
+    parseStringValue(row.device_id) ??
+    parseStringValue(row.deviceId) ??
+    "unknown-device";
+  const id = `temp:${alertId ?? `${deviceId}:${createdAt.toISOString()}:${temperatureC.toFixed(2)}`}`;
+
+  const severity = mapTemperatureSeverityToAlertSeverity(tempSeverity);
+  const title =
+    tempSeverity === "severe"
+      ? "Severe temperature alert"
+      : tempSeverity === "moderately_high"
+        ? "Temperature moderately high"
+        : "Temperature slightly high";
+
+  const message = [
+    `Detected at ${formatDateTime(createdAt)}.`,
+    `Body temperature: ${temperatureC.toFixed(1)}°C.`,
+    tempSeverity === "severe"
+      ? "Please check your baby immediately."
+      : tempSeverity === "moderately_high"
+        ? "Please check on your baby."
+        : "Monitor temperature closely.",
+  ].join(" ");
+
+  return {
+    id,
+    title,
+    message,
+    severity,
+    category: "temperature",
+    status: parseStatus(row.status, true),
+    timestamp: createdAt,
+    icon: "thermometer-outline",
+    deviceId,
+    alertId,
+    startedAt: createdAt,
+    endedAt: createdAt,
     isActive: false,
   };
 }
@@ -740,6 +862,80 @@ function applyLiveRiskyPosePayload(
   return sortAndCap([newAlert, ...current]);
 }
 
+function applyLiveTemperaturePayload(
+  current: AlertType[],
+  payload: TemperatureAlertPayload,
+): AlertType[] {
+  if (payload.event !== "temperature_alert") {
+    return current;
+  }
+
+  const createdAt =
+    parseDateValue(payload.created_at) ??
+    parseDateValue(payload.ts) ??
+    new Date();
+  const temperatureC = parseNumberValue(payload.temperature_c);
+  if (temperatureC === undefined || !Number.isFinite(temperatureC)) {
+    return current;
+  }
+
+  const tempSeverity = parseTemperatureSeverity(payload.severity, temperatureC);
+  if (!tempSeverity) {
+    return current;
+  }
+
+  const severity = mapTemperatureSeverityToAlertSeverity(tempSeverity);
+  const title =
+    tempSeverity === "severe"
+      ? "Severe temperature alert"
+      : tempSeverity === "moderately_high"
+        ? "Temperature moderately high"
+        : "Temperature slightly high";
+  const message = [
+    `Detected at ${formatDateTime(createdAt)}.`,
+    `Body temperature: ${temperatureC.toFixed(1)}°C.`,
+    tempSeverity === "severe"
+      ? "Please check your baby immediately."
+      : tempSeverity === "moderately_high"
+        ? "Please check on your baby."
+        : "Monitor temperature closely.",
+  ].join(" ");
+
+  const deviceId = parseStringValue(payload.device_id) ?? "unknown-device";
+  const alertId = parseStringValue(payload.alert_id);
+  const id = `temp:${alertId ?? `${deviceId}:${createdAt.toISOString()}:${temperatureC.toFixed(2)}`}`;
+
+  const exists = current.some(
+    (a) =>
+      a.id === id ||
+      (!!alertId && a.alertId === alertId) ||
+      (a.category === "temperature" &&
+        a.deviceId === deviceId &&
+        isCloseTime(a.timestamp, createdAt, 5_000)),
+  );
+  if (exists) {
+    return current;
+  }
+
+  const newAlert: AlertType = {
+    id,
+    title,
+    message,
+    severity,
+    category: "temperature",
+    status: "unread",
+    timestamp: createdAt,
+    icon: "thermometer-outline",
+    deviceId,
+    alertId,
+    startedAt: createdAt,
+    endedAt: createdAt,
+    isActive: false,
+  };
+
+  return sortAndCap([newAlert, ...current]);
+}
+
 const AlertsScreen = () => {
   const { getToken } = useAuth();
   const riskyStateByDeviceRef = useRef<Map<string, boolean>>(new Map());
@@ -767,10 +963,12 @@ const AlertsScreen = () => {
       }
 
       const headers = { Authorization: `Bearer ${token}` };
-      const [cryResponse, sleepResponse, riskyResponse] = await Promise.all([
+      const [cryResponse, sleepResponse, riskyResponse, temperatureResponse] =
+        await Promise.all([
         fetch(`${CRY_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
         fetch(`${SLEEP_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
         fetch(`${RISKY_POSTURE_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
+        fetch(`${TEMPERATURE_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
       ]);
 
       if (!cryResponse.ok) {
@@ -781,7 +979,7 @@ const AlertsScreen = () => {
       const cryRows = (await cryResponse.json()) as unknown[];
 
       const parseOptionalRows = async (
-        label: "sleep" | "risky-posture",
+        label: "sleep" | "risky-posture" | "temperature",
         response: Response,
       ): Promise<unknown[]> => {
         if (response.ok) {
@@ -804,15 +1002,17 @@ const AlertsScreen = () => {
         );
       };
 
-      const [sleepRows, riskyRows] = await Promise.all([
+      const [sleepRows, riskyRows, temperatureRows] = await Promise.all([
         parseOptionalRows("sleep", sleepResponse),
         parseOptionalRows("risky-posture", riskyResponse),
+        parseOptionalRows("temperature", temperatureResponse),
       ]);
 
       const fetchedAlerts = [
         ...cryRows.map(mapCryAlertRowToAlert),
         ...sleepRows.map(mapSleepAlertRowToAlert),
         ...riskyRows.map(mapRiskyPostureRowToAlert),
+        ...temperatureRows.map(mapTemperatureAlertRowToAlert),
       ].filter((alert): alert is AlertType => alert !== null);
 
       setAlerts((current) => mergeFetchedWithActiveLive(fetchedAlerts, current));
@@ -867,10 +1067,20 @@ const AlertsScreen = () => {
       },
     );
 
+    const disconnectTemperature = connectToTemperatureAlertStream(
+      (payload) => {
+        setAlerts((current) => applyLiveTemperaturePayload(current, payload));
+      },
+      (err) => {
+        console.error("[AlertsScreen] temperature stream error:", err.message);
+      },
+    );
+
     return () => {
       disconnectCry();
       disconnectSleep();
       disconnectPose();
+      disconnectTemperature();
     };
   }, []);
 
