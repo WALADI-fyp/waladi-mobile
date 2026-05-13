@@ -101,3 +101,20 @@ export interface TemperatureAlertPayload {
   alert_id?: string;
   ts?: number;
 }
+
+export type VitalAlertType = "heart_rate" | "breath_rate";
+export type VitalAlertSeverity = "critical_low" | "critical_high";
+
+export interface VitalAlertPayload {
+  event: "vital_alert" | string;
+  user_id?: string;
+  device_id?: string;
+  vital_type?: VitalAlertType | string;
+  value?: number | string | null;
+  unit?: string;
+  severity?: VitalAlertSeverity | string;
+  message?: string;
+  created_at?: string;
+  alert_id?: string | number;
+  ts?: number;
+}

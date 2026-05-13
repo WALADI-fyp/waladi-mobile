@@ -1,5 +1,5 @@
 export type AlertSeverity = 'critical' | 'warning' | 'info';
-export type AlertCategory = 'temperature' | 'humidity' | 'movement' | 'sound' | 'sleep' | 'breathing' | 'system';
+export type AlertCategory = 'temperature' | 'humidity' | 'movement' | 'sound' | 'sleep' | 'breathing' | 'heart' | 'system';
 export type AlertStatus = 'unread' | 'read' | 'dismissed';
 
 export interface Alert {
