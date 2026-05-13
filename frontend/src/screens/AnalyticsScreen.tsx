@@ -63,13 +63,6 @@ function formatDurationCompact(seconds: number): string {
   return `${hours}h ${minutes}m`;
 }
 
-function calculateComfortScore(tempC: number, humidityRh: number): number {
-  const tempPenalty = Math.max(0, Math.abs(tempC - 22) * 8);
-  const humidityPenalty = Math.max(0, Math.abs(humidityRh - 50) * 1.2);
-  const score = Math.round(100 - tempPenalty - humidityPenalty);
-  return Math.min(100, Math.max(0, score));
-}
-
 function buildTrend(
   current: number,
   previous: number | null,
@@ -116,15 +109,6 @@ function buildEnvironmentMetrics(
   latest: WeeklyReport,
   previous: WeeklyReport | null,
 ): MetricData[] {
-  const latestComfort = calculateComfortScore(
-    latest.avgRoomTemperatureC,
-    latest.avgRoomHumidityRh,
-  );
-  const previousComfort =
-    previous === null
-      ? null
-      : calculateComfortScore(previous.avgRoomTemperatureC, previous.avgRoomHumidityRh);
-
   return [
     {
       id: "env_temp",
@@ -152,21 +136,6 @@ function buildEnvironmentMetrics(
         latest.avgRoomHumidityRh,
         previous?.avgRoomHumidityRh ?? null,
         (delta) => `${delta.toFixed(1)}%`,
-      ),
-    },
-    {
-      id: "env_comfort",
-      label: "Nursery Comfort Score",
-      value: `${latestComfort}`,
-      unit: "/100",
-      icon: "leaf-outline",
-      iconColor: "#43A047",
-      backgroundColor: "#E8F5E9",
-      ...buildTrend(
-        latestComfort,
-        previousComfort,
-        (delta) => `${Math.round(delta)} pts`,
-        "higher_is_better",
       ),
     },
   ];

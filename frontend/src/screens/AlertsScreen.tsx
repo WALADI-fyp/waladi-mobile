@@ -145,6 +145,16 @@ function mapTemperatureSeverityToAlertSeverity(
   return "info";
 }
 
+function statusPriority(status: AlertStatus): number {
+  if (status === "dismissed") return 3;
+  if (status === "read") return 2;
+  return 1;
+}
+
+function mostAcknowledgedStatus(a: AlertStatus, b: AlertStatus): AlertStatus {
+  return statusPriority(a) >= statusPriority(b) ? a : b;
+}
+
 function formatDateTime(date: Date): string {
   return date.toLocaleString("en-US", {
     year: "numeric",
@@ -303,13 +313,20 @@ function mergeFetchedWithActiveLive(
   const merged = [...fetched];
 
   for (const liveAlert of current) {
-    const alreadyPresent = merged.some((fetchedAlert) =>
+    const existingIndex = merged.findIndex((fetchedAlert) =>
       isSameAlertSemantic(fetchedAlert, liveAlert),
     );
 
-    if (!alreadyPresent) {
+    if (existingIndex === -1) {
       merged.push(liveAlert);
+      continue;
     }
+
+    const existing = merged[existingIndex];
+    merged[existingIndex] = {
+      ...existing,
+      status: mostAcknowledgedStatus(existing.status, liveAlert.status),
+    };
   }
 
   return sortAndCap(merged);
@@ -645,7 +662,7 @@ function applyLiveCryPayload(
         existing.startProb ?? prob,
       ),
       severity: "critical",
-      status: "unread",
+      status: existing.status,
       deviceId: eventDeviceId,
       alertId: eventAlertId ?? existing.alertId,
       startedAt,
@@ -755,7 +772,7 @@ function applyLiveSleepPayload(
       title: "Sleeping in progress",
       message: buildSleepMessage(startedAt, null, undefined, eventEar),
       severity: "info",
-      status: "unread",
+      status: existing.status,
       startedAt,
       endedAt: null,
       isActive: true,
