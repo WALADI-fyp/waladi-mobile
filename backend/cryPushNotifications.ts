@@ -21,6 +21,9 @@ let riskyBaselineInitialized = false;
 const seenTemperatureAlerts = new Set<string>();
 let temperatureBaselineInitialized = false;
 
+const seenVitalAlerts = new Set<string>();
+let vitalBaselineInitialized = false;
+
 let pollTimer: NodeJS.Timeout | null = null;
 
 function parseString(value: unknown): string | null {
@@ -109,6 +112,9 @@ type TemperatureSeverity =
   | "moderately_high"
   | "severe";
 
+type VitalType = "heart_rate" | "breath_rate";
+type VitalSeverity = "critical_low" | "critical_high";
+
 function classifyTemperatureSeverity(
   temperatureC: number,
 ): TemperatureSeverity | null {
@@ -147,6 +153,56 @@ function getTemperatureAlertKey(
   const deviceId = getDeviceId(row) ?? "unknown-device";
   const temperature = parseNumber(row.temperature_c) ?? parseNumber(row.temperatureC) ?? -999;
   return `temp:device:${deviceId}:created:${createdAt.toISOString()}:value:${temperature.toFixed(3)}`;
+}
+
+function parseVitalType(value: unknown): VitalType | null {
+  if (value === "heart_rate" || value === "breath_rate") {
+    return value;
+  }
+  return null;
+}
+
+function classifyVitalSeverity(
+  vitalType: VitalType,
+  value: number,
+): VitalSeverity | null {
+  if (vitalType === "heart_rate") {
+    if (value < 80) return "critical_low";
+    if (value > 200) return "critical_high";
+    return null;
+  }
+
+  // breath_rate
+  if (value < 20) return "critical_low";
+  if (value > 60) return "critical_high";
+  return null;
+}
+
+function parseVitalSeverity(
+  severityRaw: unknown,
+  vitalType: VitalType,
+  value: number,
+): VitalSeverity | null {
+  if (severityRaw === "critical_low" || severityRaw === "critical_high") {
+    return severityRaw;
+  }
+  return classifyVitalSeverity(vitalType, value);
+}
+
+function getVitalAlertKey(
+  row: Record<string, unknown>,
+  createdAt: Date,
+): string {
+  const alertId = parseIdentifier(row.alert_id) ?? parseIdentifier(row.alertId);
+  if (alertId) return `vital:alert:${alertId}`;
+
+  const rowId = parseIdentifier(row.id);
+  if (rowId) return `vital:id:${rowId}`;
+
+  const deviceId = getDeviceId(row) ?? "unknown-device";
+  const vitalType = parseString(row.vital_type) ?? parseString(row.vitalType) ?? "unknown";
+  const vitalValue = parseNumber(row.value) ?? -999;
+  return `vital:device:${deviceId}:type:${vitalType}:created:${createdAt.toISOString()}:value:${vitalValue.toFixed(3)}`;
 }
 
 function toJson(
@@ -435,6 +491,49 @@ async function pushTemperatureAlert(
   }));
 }
 
+async function pushVitalAlert(
+  row: Record<string, unknown>,
+  alertKey: string,
+) {
+  const userIds = await resolveUserIds(row);
+  if (userIds.length === 0) return;
+
+  const vitalType = parseVitalType(
+    parseString(row.vital_type) ?? parseString(row.vitalType),
+  );
+  const value = parseNumber(row.value);
+  if (!vitalType || value === null) return;
+
+  const severity = parseVitalSeverity(row.severity, vitalType, value);
+  if (!severity) return;
+
+  const dbMessage = parseString(row.message);
+  const typeLabel = vitalType === "heart_rate" ? "Heart rate" : "Breath rate";
+  const directionLabel = severity === "critical_low" ? "critically low" : "critically high";
+  const title = `${typeLabel} ${directionLabel}`;
+  const defaultMessage =
+    vitalType === "heart_rate"
+      ? `${typeLabel} is ${directionLabel}: ${Math.round(value)} bpm.`
+      : `${typeLabel} is ${directionLabel}: ${Math.round(value)} breaths/min.`;
+  const body = dbMessage ?? defaultMessage;
+
+  await sendPushForUsers(userIds, (to) => ({
+    to,
+    sound: "default",
+    title,
+    body,
+    priority: "high",
+    data: {
+      type: "vital_alert",
+      alert_key: alertKey,
+      device_id: getDeviceId(row),
+      vital_type: vitalType,
+      value,
+      severity,
+    },
+  }));
+}
+
 async function pollCryAlertsForPush(): Promise<void> {
   const result = await pool.query(
     `SELECT *
@@ -675,11 +774,77 @@ async function pollTemperatureAlertsForPush(): Promise<void> {
   }
 }
 
+async function pollVitalAlertsForPush(): Promise<void> {
+  const result = await pool.query(
+    `SELECT *
+     FROM vital_alerts
+     WHERE created_at >= NOW() - $1::interval
+     ORDER BY created_at ASC
+     LIMIT 500`,
+    [LOOKBACK_WINDOW],
+  );
+
+  const rows = result.rows as Record<string, unknown>[];
+  if (!vitalBaselineInitialized) {
+    for (const row of rows) {
+      const createdAt =
+        parseDate(row.created_at) ??
+        parseDate(row.createdAt) ??
+        parseDate(row.ts);
+      if (!createdAt) continue;
+
+      const vitalType = parseVitalType(
+        parseString(row.vital_type) ?? parseString(row.vitalType),
+      );
+      const value = parseNumber(row.value);
+      if (!vitalType || value === null) continue;
+
+      const severity = parseVitalSeverity(row.severity, vitalType, value);
+      if (!severity) continue;
+
+      const alertKey = getVitalAlertKey(row, createdAt);
+      seenVitalAlerts.add(alertKey);
+    }
+
+    vitalBaselineInitialized = true;
+    console.log("[push] Vital alert push baseline initialized");
+    return;
+  }
+
+  for (const row of rows) {
+    const createdAt =
+      parseDate(row.created_at) ??
+      parseDate(row.createdAt) ??
+      parseDate(row.ts);
+    if (!createdAt) continue;
+
+    const vitalType = parseVitalType(
+      parseString(row.vital_type) ?? parseString(row.vitalType),
+    );
+    const value = parseNumber(row.value);
+    if (!vitalType || value === null) continue;
+
+    const severity = parseVitalSeverity(row.severity, vitalType, value);
+    if (!severity) continue;
+
+    const alertKey = getVitalAlertKey(row, createdAt);
+    if (seenVitalAlerts.has(alertKey)) continue;
+
+    seenVitalAlerts.add(alertKey);
+    try {
+      await pushVitalAlert(row, alertKey);
+    } catch (err) {
+      console.error("[push] Failed to send vital alert push:", err);
+    }
+  }
+}
+
 async function pollAllPushAlerts(): Promise<void> {
   await pollCryAlertsForPush();
   await pollSleepAlertsForPush();
   await pollRiskyPostureAlertsForPush();
   await pollTemperatureAlertsForPush();
+  await pollVitalAlertsForPush();
 }
 
 export async function startCryPushNotifications(): Promise<void> {
@@ -693,7 +858,7 @@ export async function startCryPushNotifications(): Promise<void> {
   }, POLL_INTERVAL_MS);
 
   console.log(
-    "[push] Alert push notifier started (cry/sleep/risky posture/temperature)",
+    "[push] Alert push notifier started (cry/sleep/risky posture/temperature/vitals)",
   );
 }
 
