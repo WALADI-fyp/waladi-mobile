@@ -25,20 +25,25 @@ import {
   SLEEP_ALERTS_URL,
   RISKY_POSTURE_ALERTS_URL,
   TEMPERATURE_ALERTS_URL,
+  VITAL_ALERTS_URL,
 } from "../services/backend/config";
 import { connectToCryAlertStream } from "../services/backend/cryAlertClient";
 import { connectToSleepAlertStream } from "../services/backend/sleepAlertClient";
 import { connectToAiPoseStream } from "../services/backend/aiPoseClient";
 import { connectToTemperatureAlertStream } from "../services/backend/temperatureAlertClient";
+import { connectToVitalAlertStream } from "../services/backend/vitalAlertClient";
 import {
   AiPosePayload,
   CryAlertPayload,
   SleepAlertPayload,
   TemperatureAlertPayload,
+  VitalAlertPayload,
 } from "../services/backend/types";
 
 type FilterType = "all" | "critical" | "warning" | "info";
 type TemperatureAlertSeverity = "normal_high" | "moderately_high" | "severe";
+type VitalAlertType = "heart_rate" | "breath_rate";
+type VitalAlertSeverity = "critical_low" | "critical_high";
 
 const MAX_ALERTS = 50;
 const RISKY_ALERT_MIN_GAP_MS = 60_000;
@@ -96,6 +101,54 @@ function parseIdentifierValue(value: unknown): string | undefined {
   return undefined;
 }
 
+function parseVitalType(value: unknown): VitalAlertType | null {
+  if (value === "heart_rate" || value === "breath_rate") {
+    return value;
+  }
+  return null;
+}
+
+function classifyVitalSeverity(
+  vitalType: VitalAlertType,
+  value: number,
+): VitalAlertSeverity | null {
+  if (vitalType === "heart_rate") {
+    if (value < 80) return "critical_low";
+    if (value > 200) return "critical_high";
+    return null;
+  }
+
+  // breath_rate
+  if (value < 20) return "critical_low";
+  if (value > 60) return "critical_high";
+  return null;
+}
+
+function parseVitalSeverity(
+  value: unknown,
+  vitalType: VitalAlertType,
+  numericValue: number,
+): VitalAlertSeverity | null {
+  if (value === "critical_low" || value === "critical_high") {
+    return value;
+  }
+  return classifyVitalSeverity(vitalType, numericValue);
+}
+
+function mapVitalTypeToCategory(vitalType: VitalAlertType): "heart" | "breathing" {
+  return vitalType === "heart_rate" ? "heart" : "breathing";
+}
+
+function buildVitalTitle(
+  vitalType: VitalAlertType,
+  vitalSeverity: VitalAlertSeverity,
+): string {
+  const vitalLabel = vitalType === "heart_rate" ? "Heart rate" : "Breath rate";
+  const directionLabel =
+    vitalSeverity === "critical_low" ? "critically low" : "critically high";
+  return `${vitalLabel} ${directionLabel}`;
+}
+
 function parseSeverity(value: unknown, isActive: boolean): AlertSeverity {
   if (value === "critical" || value === "warning" || value === "info") {
     return value;
@@ -143,6 +196,16 @@ function mapTemperatureSeverityToAlertSeverity(
   if (severity === "severe") return "critical";
   if (severity === "moderately_high") return "warning";
   return "info";
+}
+
+function statusPriority(status: AlertStatus): number {
+  if (status === "dismissed") return 3;
+  if (status === "read") return 2;
+  return 1;
+}
+
+function mostAcknowledgedStatus(a: AlertStatus, b: AlertStatus): AlertStatus {
+  return statusPriority(a) >= statusPriority(b) ? a : b;
 }
 
 function formatDateTime(date: Date): string {
@@ -303,13 +366,20 @@ function mergeFetchedWithActiveLive(
   const merged = [...fetched];
 
   for (const liveAlert of current) {
-    const alreadyPresent = merged.some((fetchedAlert) =>
+    const existingIndex = merged.findIndex((fetchedAlert) =>
       isSameAlertSemantic(fetchedAlert, liveAlert),
     );
 
-    if (!alreadyPresent) {
+    if (existingIndex === -1) {
       merged.push(liveAlert);
+      continue;
     }
+
+    const existing = merged[existingIndex];
+    merged[existingIndex] = {
+      ...existing,
+      status: mostAcknowledgedStatus(existing.status, liveAlert.status),
+    };
   }
 
   return sortAndCap(merged);
@@ -593,6 +663,64 @@ function mapTemperatureAlertRowToAlert(raw: unknown): AlertType | null {
   };
 }
 
+function mapVitalAlertRowToAlert(raw: unknown): AlertType | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const row = raw as Record<string, unknown>;
+  const createdAt =
+    parseDateValue(row.created_at) ??
+    parseDateValue(row.createdAt) ??
+    parseDateValue(row.ts) ??
+    new Date();
+
+  const vitalType = parseVitalType(
+    parseStringValue(row.vital_type) ?? parseStringValue(row.vitalType),
+  );
+  const value = parseNumberValue(row.value);
+  if (!vitalType || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  const vitalSeverity = parseVitalSeverity(row.severity, vitalType, value);
+  if (!vitalSeverity) {
+    return null;
+  }
+
+  const alertId =
+    parseIdentifierValue(row.alert_id) ??
+    parseIdentifierValue(row.alertId) ??
+    parseIdentifierValue(row.id);
+  const deviceId =
+    parseStringValue(row.device_id) ??
+    parseStringValue(row.deviceId) ??
+    "unknown-device";
+  const id = `vital:${alertId ?? `${deviceId}:${vitalType}:${createdAt.toISOString()}:${value.toFixed(2)}`}`;
+
+  const messageFromDb = parseStringValue(row.message);
+  const fallbackMessage =
+    vitalType === "heart_rate"
+      ? `Heart rate: ${Math.round(value)} bpm.`
+      : `Breath rate: ${Math.round(value)} breaths/min.`;
+
+  return {
+    id,
+    title: buildVitalTitle(vitalType, vitalSeverity),
+    message: messageFromDb ?? fallbackMessage,
+    severity: "critical",
+    category: mapVitalTypeToCategory(vitalType),
+    status: parseStatus(row.status, true),
+    timestamp: createdAt,
+    icon: vitalType === "heart_rate" ? "heart-outline" : "fitness-outline",
+    deviceId,
+    alertId,
+    startedAt: createdAt,
+    endedAt: createdAt,
+    isActive: false,
+  };
+}
+
 function applyLiveCryPayload(
   current: AlertType[],
   payload: CryAlertPayload,
@@ -645,7 +773,7 @@ function applyLiveCryPayload(
         existing.startProb ?? prob,
       ),
       severity: "critical",
-      status: "unread",
+      status: existing.status,
       deviceId: eventDeviceId,
       alertId: eventAlertId ?? existing.alertId,
       startedAt,
@@ -755,7 +883,7 @@ function applyLiveSleepPayload(
       title: "Sleeping in progress",
       message: buildSleepMessage(startedAt, null, undefined, eventEar),
       severity: "info",
-      status: "unread",
+      status: existing.status,
       startedAt,
       endedAt: null,
       isActive: true,
@@ -936,6 +1064,72 @@ function applyLiveTemperaturePayload(
   return sortAndCap([newAlert, ...current]);
 }
 
+function applyLiveVitalPayload(
+  current: AlertType[],
+  payload: VitalAlertPayload,
+): AlertType[] {
+  if (payload.event !== "vital_alert") {
+    return current;
+  }
+
+  const createdAt =
+    parseDateValue(payload.created_at) ??
+    parseDateValue(payload.ts) ??
+    new Date();
+
+  const vitalType = parseVitalType(payload.vital_type);
+  const value = parseNumberValue(payload.value);
+  if (!vitalType || value === undefined || !Number.isFinite(value)) {
+    return current;
+  }
+
+  const vitalSeverity = parseVitalSeverity(payload.severity, vitalType, value);
+  if (!vitalSeverity) {
+    return current;
+  }
+
+  const deviceId = parseStringValue(payload.device_id) ?? "unknown-device";
+  const alertId = parseIdentifierValue(payload.alert_id);
+  const id = `vital:${alertId ?? `${deviceId}:${vitalType}:${createdAt.toISOString()}:${value.toFixed(2)}`}`;
+
+  const exists = current.some(
+    (a) =>
+      a.id === id ||
+      (!!alertId && a.alertId === alertId) ||
+      (a.deviceId === deviceId &&
+        isCloseTime(a.timestamp, createdAt, 5_000) &&
+        ((a.category === "heart" && vitalType === "heart_rate") ||
+          (a.category === "breathing" && vitalType === "breath_rate"))),
+  );
+  if (exists) {
+    return current;
+  }
+
+  const messageFromPayload = parseStringValue(payload.message);
+  const fallbackMessage =
+    vitalType === "heart_rate"
+      ? `Heart rate: ${Math.round(value)} bpm.`
+      : `Breath rate: ${Math.round(value)} breaths/min.`;
+
+  const newAlert: AlertType = {
+    id,
+    title: buildVitalTitle(vitalType, vitalSeverity),
+    message: messageFromPayload ?? fallbackMessage,
+    severity: "critical",
+    category: mapVitalTypeToCategory(vitalType),
+    status: "unread",
+    timestamp: createdAt,
+    icon: vitalType === "heart_rate" ? "heart-outline" : "fitness-outline",
+    deviceId,
+    alertId,
+    startedAt: createdAt,
+    endedAt: createdAt,
+    isActive: false,
+  };
+
+  return sortAndCap([newAlert, ...current]);
+}
+
 const AlertsScreen = () => {
   const { getToken } = useAuth();
   const riskyStateByDeviceRef = useRef<Map<string, boolean>>(new Map());
@@ -963,12 +1157,13 @@ const AlertsScreen = () => {
       }
 
       const headers = { Authorization: `Bearer ${token}` };
-      const [cryResponse, sleepResponse, riskyResponse, temperatureResponse] =
+      const [cryResponse, sleepResponse, riskyResponse, temperatureResponse, vitalResponse] =
         await Promise.all([
         fetch(`${CRY_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
         fetch(`${SLEEP_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
         fetch(`${RISKY_POSTURE_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
         fetch(`${TEMPERATURE_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
+        fetch(`${VITAL_ALERTS_URL}?limit=${MAX_ALERTS}`, { headers }),
       ]);
 
       if (!cryResponse.ok) {
@@ -979,7 +1174,7 @@ const AlertsScreen = () => {
       const cryRows = (await cryResponse.json()) as unknown[];
 
       const parseOptionalRows = async (
-        label: "sleep" | "risky-posture" | "temperature",
+        label: "sleep" | "risky-posture" | "temperature" | "vitals",
         response: Response,
       ): Promise<unknown[]> => {
         if (response.ok) {
@@ -1002,10 +1197,11 @@ const AlertsScreen = () => {
         );
       };
 
-      const [sleepRows, riskyRows, temperatureRows] = await Promise.all([
+      const [sleepRows, riskyRows, temperatureRows, vitalRows] = await Promise.all([
         parseOptionalRows("sleep", sleepResponse),
         parseOptionalRows("risky-posture", riskyResponse),
         parseOptionalRows("temperature", temperatureResponse),
+        parseOptionalRows("vitals", vitalResponse),
       ]);
 
       const fetchedAlerts = [
@@ -1013,6 +1209,7 @@ const AlertsScreen = () => {
         ...sleepRows.map(mapSleepAlertRowToAlert),
         ...riskyRows.map(mapRiskyPostureRowToAlert),
         ...temperatureRows.map(mapTemperatureAlertRowToAlert),
+        ...vitalRows.map(mapVitalAlertRowToAlert),
       ].filter((alert): alert is AlertType => alert !== null);
 
       setAlerts((current) => mergeFetchedWithActiveLive(fetchedAlerts, current));
@@ -1076,11 +1273,21 @@ const AlertsScreen = () => {
       },
     );
 
+    const disconnectVital = connectToVitalAlertStream(
+      (payload) => {
+        setAlerts((current) => applyLiveVitalPayload(current, payload));
+      },
+      (err) => {
+        console.error("[AlertsScreen] vital stream error:", err.message);
+      },
+    );
+
     return () => {
       disconnectCry();
       disconnectSleep();
       disconnectPose();
       disconnectTemperature();
+      disconnectVital();
     };
   }, []);
 

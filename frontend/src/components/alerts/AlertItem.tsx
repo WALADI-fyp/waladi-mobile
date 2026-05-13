@@ -40,6 +40,7 @@ const CATEGORY_ICONS: Record<string, string> = {
   sound: "volume-high-outline",
   sleep: "moon-outline",
   breathing: "fitness-outline",
+  heart: "heart-outline",
   system: "settings-outline",
 };
 
